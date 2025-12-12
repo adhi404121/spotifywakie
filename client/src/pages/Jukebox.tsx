@@ -17,12 +17,11 @@ import {
 
 // Configuration
 const CLIENT_ID = "05ac566290dc43a6b8836c57cb41d440";
-// Note: Implicit Grant Flow doesn't use Client Secret on the frontend.
-// Using Secret on frontend is insecure and blocked by CORS.
-// We will use Implicit Grant (token in URL hash) for this prototype.
 const REDIRECT_URI = window.location.hostname === "localhost" 
   ? "http://localhost:5000/callback" 
   : "https://spotifywakie.vercel.app/callback";
+// Note: We use Implicit Grant (Client ID only) for frontend-only apps. 
+// Client Secret is NOT used here as it cannot be safely exposed in the browser.
 
 const SCOPES = [
   "user-modify-playback-state",
@@ -55,7 +54,7 @@ export default function Jukebox() {
     const token = localStorage.getItem("spotify_access_token");
     if (token) {
       setSpotifyToken(token);
-      setIsAuthenticated(true); // Auto-admin if token exists (for this prototype)
+      setIsAuthenticated(true); // Auto-admin if token exists
       fetchNowPlaying(token);
       const interval = setInterval(() => fetchNowPlaying(token), 5000);
       return () => clearInterval(interval);
@@ -251,10 +250,22 @@ export default function Jukebox() {
               {isAuthenticated ? <Unlock className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
               Admin Controls
             </p>
+            {/* If authenticated as admin but no token, show connect button */}
             {!spotifyToken && isAuthenticated && (
-               <Button variant="ghost" size="sm" onClick={handleLogin} className="text-[#1DB954] text-xs h-6">
-                 <LogIn className="w-3 h-3 mr-1" /> Connect Spotify
+               <Button 
+                 size="sm" 
+                 onClick={handleLogin} 
+                 className="bg-[#1DB954] text-black hover:bg-[#1ed760] text-xs h-7 font-bold animate-pulse"
+               >
+                 <LogIn className="w-3 h-3 mr-1" /> Authenticate Jukebox
                </Button>
+            )}
+             {/* If connected, show small status */}
+            {spotifyToken && (
+               <span className="text-[10px] text-spotify-green flex items-center gap-1">
+                 <div className="w-1.5 h-1.5 rounded-full bg-spotify-green animate-pulse"></div>
+                 Live
+               </span>
             )}
           </div>
 
