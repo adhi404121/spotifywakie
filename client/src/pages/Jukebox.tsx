@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/dialog";
 
 // Configuration
-const CLIENT_ID = "05ac566290dc43a6b8836c57cb41d440";
+const CLIENT_ID = "3d8ee1cbb0da4589a263f7ed22594d2f";
 const REDIRECT_URI = window.location.hostname === "localhost" 
   ? "http://localhost:5000/" 
   : "https://spotifywakiee.vercel.app/";
