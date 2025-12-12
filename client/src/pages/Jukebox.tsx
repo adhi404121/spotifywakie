@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Play, Pause, SkipForward, Volume2, Volume1, Plus, Music2, Lock, Unlock } from "lucide-react";
+import { Play, Pause, SkipForward, Volume2, Volume1, Plus, Music2, Lock, Unlock, LogIn } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
@@ -15,6 +15,21 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 
+// Configuration
+const CLIENT_ID = "05ac566290dc43a6b8836c57cb41d440";
+// Note: Implicit Grant Flow doesn't use Client Secret on the frontend.
+// Using Secret on frontend is insecure and blocked by CORS.
+// We will use Implicit Grant (token in URL hash) for this prototype.
+const REDIRECT_URI = window.location.hostname === "localhost" 
+  ? "http://localhost:5000/callback" 
+  : "https://spotifywakie.vercel.app/callback";
+
+const SCOPES = [
+  "user-modify-playback-state",
+  "user-read-playback-state",
+  "user-read-currently-playing"
+];
+
 const ADMIN_PASSWORD = "A";
 
 export default function Jukebox() {
@@ -24,8 +39,9 @@ export default function Jukebox() {
   const [showPasswordPrompt, setShowPasswordPrompt] = useState(false);
   const [passwordInput, setPasswordInput] = useState("");
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
+  const [spotifyToken, setSpotifyToken] = useState<string | null>(null);
   
-  // Mock State for UI
+  // State for UI
   const [isPlaying, setIsPlaying] = useState(false);
   const [volume, setVolume] = useState([50]);
   const [currentTrack, setCurrentTrack] = useState({
@@ -34,33 +50,99 @@ export default function Jukebox() {
     image: null
   });
 
-  const handleQueueSong = () => {
-    if (!songInput.trim()) {
-      toast({
-        title: "Empty Input",
-        description: "Please enter a song name or Spotify URI.",
-        variant: "destructive",
+  useEffect(() => {
+    // Check for token
+    const token = localStorage.getItem("spotify_access_token");
+    if (token) {
+      setSpotifyToken(token);
+      setIsAuthenticated(true); // Auto-admin if token exists (for this prototype)
+      fetchNowPlaying(token);
+      const interval = setInterval(() => fetchNowPlaying(token), 5000);
+      return () => clearInterval(interval);
+    }
+  }, []);
+
+  const handleLogin = () => {
+    // Implicit Grant Flow
+    const authUrl = `https://accounts.spotify.com/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${encodeURIComponent(SCOPES.join(" "))}&response_type=token&show_dialog=true`;
+    window.location.href = authUrl;
+  };
+
+  const fetchNowPlaying = async (token: string) => {
+    try {
+      const res = await fetch("https://api.spotify.com/v1/me/player/currently-playing", {
+        headers: { Authorization: `Bearer ${token}` }
       });
+      if (res.status === 204 || res.status > 400) return;
+      
+      const data = await res.json();
+      if (data && data.item) {
+        setCurrentTrack({
+          name: data.item.name,
+          artist: data.item.artists.map((a: any) => a.name).join(", "),
+          image: data.item.album.images[0]?.url
+        });
+        setIsPlaying(data.is_playing);
+      }
+    } catch (e) {
+      console.error("Error fetching now playing", e);
+    }
+  };
+
+  const spotifyApiCall = async (endpoint: string, method: string = "POST", body?: any) => {
+    if (!spotifyToken) {
+      toast({ title: "Not Connected", description: "Please login to Spotify first.", variant: "destructive" });
       return;
     }
 
-    // Mock functionality
-    toast({
-      title: "Added to Queue",
-      description: `"${songInput}" has been added to the queue.`,
-      className: "border-l-4 border-l-spotify-green",
-    });
-    
-    // Simulating track update if nothing is playing
-    if (currentTrack.name === "Ready to Play") {
-      setCurrentTrack({
-        name: songInput,
-        artist: "Now Playing",
-        image: null
+    try {
+      const res = await fetch(`https://api.spotify.com/v1/me/player/${endpoint}`, {
+        method,
+        headers: { 
+          Authorization: `Bearer ${spotifyToken}`,
+          "Content-Type": "application/json"
+        },
+        body: body ? JSON.stringify(body) : undefined
       });
-      setIsPlaying(true);
+
+      if (res.ok) {
+        toast({ title: "Success", className: "text-spotify-green border-spotify-green" });
+        setTimeout(() => fetchNowPlaying(spotifyToken), 500); // Refresh state
+      } else {
+        const err = await res.json();
+        toast({ title: "Error", description: err.error?.message || "Command failed", variant: "destructive" });
+      }
+    } catch (e) {
+      toast({ title: "Network Error", variant: "destructive" });
     }
-    
+  };
+
+  const handleQueueSong = async () => {
+    if (!songInput.trim()) return;
+
+    // Determine if URI or Search
+    let uri = songInput.trim();
+    if (!uri.startsWith("spotify:track:")) {
+      // Basic search to get URI (requires token)
+       if (spotifyToken) {
+         const searchRes = await fetch(`https://api.spotify.com/v1/search?q=${encodeURIComponent(songInput)}&type=track&limit=1`, {
+            headers: { Authorization: `Bearer ${spotifyToken}` }
+         });
+         const searchData = await searchRes.json();
+         if (searchData.tracks.items.length > 0) {
+           uri = searchData.tracks.items[0].uri;
+           toast({ description: `Found: ${searchData.tracks.items[0].name}` });
+         } else {
+           toast({ title: "Not Found", variant: "destructive" });
+           return;
+         }
+       } else {
+          toast({ title: "Login Required", description: "Admin must login to search songs.", variant: "destructive" });
+          return;
+       }
+    }
+
+    await spotifyApiCall(`queue?uri=${uri}`);
     setSongInput("");
   };
 
@@ -97,24 +179,6 @@ export default function Jukebox() {
     }
   };
 
-  const togglePlayPause = () => {
-    setIsPlaying(!isPlaying);
-    toast({
-      description: isPlaying ? "Paused" : "Resumed",
-    });
-  };
-
-  const skipTrack = () => {
-    toast({
-      description: "Skipped to next track",
-    });
-  };
-
-  const handleVolumeChange = (value: number[]) => {
-    setVolume(value);
-    // Debounce toast or just show visually in slider
-  };
-
   return (
     <div className="min-h-screen bg-[#121212] flex items-center justify-center p-4 overflow-hidden relative">
       {/* Animated Background Rings */}
@@ -135,7 +199,7 @@ export default function Jukebox() {
       </div>
 
       {/* Controller Box */}
-      <Card className="relative w-full max-w-md bg-[#121212]/90 backdrop-blur-xl border-white/10 p-6 md:p-8 rounded-2xl shadow-2xl z-10">
+      <Card className="relative w-full max-w-md bg-[#121212]/80 backdrop-blur-xl border-white/5 p-6 md:p-8 rounded-2xl shadow-2xl z-10">
         
         {/* Header */}
         <div className="text-center mb-8">
@@ -148,9 +212,12 @@ export default function Jukebox() {
           </p>
         </div>
 
-        {/* Now Playing Info (Mock) */}
-        <div className="mb-8 text-center">
-           <div className="text-xl font-medium text-white mb-1 truncate">{currentTrack.name}</div>
+        {/* Now Playing Info */}
+        <div className="mb-8 text-center flex flex-col items-center">
+           {currentTrack.image && (
+             <img src={currentTrack.image} alt="Album Art" className="w-32 h-32 rounded-lg mb-4 shadow-lg" />
+           )}
+           <div className="text-xl font-medium text-white mb-1 truncate w-full px-4">{currentTrack.name}</div>
            <div className="text-zinc-500 text-sm">{currentTrack.artist}</div>
         </div>
 
@@ -184,13 +251,21 @@ export default function Jukebox() {
               {isAuthenticated ? <Unlock className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
               Admin Controls
             </p>
+            {!spotifyToken && isAuthenticated && (
+               <Button variant="ghost" size="sm" onClick={handleLogin} className="text-[#1DB954] text-xs h-6">
+                 <LogIn className="w-3 h-3 mr-1" /> Connect Spotify
+               </Button>
+            )}
           </div>
 
           <div className="grid grid-cols-4 gap-3">
             <Button
               variant="secondary"
               className="h-14 bg-[#282828] hover:bg-[#3E3E3E] border-0 text-white"
-              onClick={() => executeAdminAction(togglePlayPause)}
+              onClick={() => executeAdminAction(() => {
+                if(isPlaying) spotifyApiCall("pause", "PUT");
+                else spotifyApiCall("play", "PUT");
+              })}
             >
               {isPlaying ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6" />}
             </Button>
@@ -198,7 +273,7 @@ export default function Jukebox() {
             <Button
               variant="secondary"
               className="h-14 bg-[#282828] hover:bg-[#3E3E3E] border-0 text-white"
-              onClick={() => executeAdminAction(skipTrack)}
+              onClick={() => executeAdminAction(() => spotifyApiCall("next", "POST"))}
             >
               <SkipForward className="w-6 h-6" />
             </Button>
@@ -207,7 +282,10 @@ export default function Jukebox() {
               <Volume1 className="w-4 h-4 text-zinc-400" />
               <Slider 
                 value={volume} 
-                onValueChange={(val) => executeAdminAction(() => handleVolumeChange(val))}
+                onValueChange={(val) => {
+                   setVolume(val);
+                   executeAdminAction(() => spotifyApiCall(`volume?volume_percent=${val[0]}`, "PUT"));
+                }}
                 max={100} 
                 step={1}
                 className="cursor-pointer" 

@@ -5,11 +5,13 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/not-found";
 import Jukebox from "@/pages/Jukebox";
+import Callback from "@/pages/Callback";
 
 function Router() {
   return (
     <Switch>
       <Route path="/" component={Jukebox} />
+      <Route path="/callback" component={Callback} />
       <Route component={NotFound} />
     </Switch>
   );
