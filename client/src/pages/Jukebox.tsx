@@ -18,8 +18,8 @@ import {
 // Configuration
 const CLIENT_ID = "05ac566290dc43a6b8836c57cb41d440";
 const REDIRECT_URI = window.location.hostname === "localhost" 
-  ? "http://localhost:5000/callback" 
-  : "https://spotifywakiee.vercel.app/callback";
+  ? "http://localhost:5000/" 
+  : "https://spotifywakiee.vercel.app/";
 // Note: We use Implicit Grant (Client ID only) for frontend-only apps. 
 // Client Secret is NOT used here as it cannot be safely exposed in the browser.
 
@@ -50,13 +50,32 @@ export default function Jukebox() {
   });
 
   useEffect(() => {
-    // Check for token
-    const token = localStorage.getItem("spotify_access_token");
-    if (token) {
-      setSpotifyToken(token);
+    // 1. Check URL Hash for Token (Redirect back from Spotify)
+    const hash = window.location.hash;
+    if (hash && hash.includes("access_token")) {
+      const params = new URLSearchParams(hash.substring(1));
+      const token = params.get("access_token");
+      if (token) {
+        localStorage.setItem("spotify_access_token", token);
+        window.location.hash = ""; // Clear hash
+        setSpotifyToken(token);
+        setIsAuthenticated(true);
+        fetchNowPlaying(token);
+        toast({
+            title: "Spotify Connected",
+            description: "Jukebox is ready to rock!",
+            className: "text-spotify-green border-spotify-green",
+        });
+      }
+    }
+
+    // 2. Check LocalStorage for existing Token
+    const storedToken = localStorage.getItem("spotify_access_token");
+    if (storedToken) {
+      setSpotifyToken(storedToken);
       setIsAuthenticated(true); // Auto-admin if token exists
-      fetchNowPlaying(token);
-      const interval = setInterval(() => fetchNowPlaying(token), 5000);
+      fetchNowPlaying(storedToken);
+      const interval = setInterval(() => fetchNowPlaying(storedToken), 5000);
       return () => clearInterval(interval);
     }
   }, []);
