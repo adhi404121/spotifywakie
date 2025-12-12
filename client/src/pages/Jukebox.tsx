@@ -141,7 +141,7 @@ export default function Jukebox() {
         <div className="text-center mb-8">
           <h1 className="text-3xl font-display font-bold text-[#1DB954] tracking-tight mb-2 flex items-center justify-center gap-2">
             <Music2 className="w-8 h-8" />
-            Spotify Jukebox
+            KARIVEPPILA JUKEBOX
           </h1>
           <p className="text-zinc-400 text-sm">
             {currentTrack.name === "Ready to Play" ? "Queue is empty" : "Now Playing"}
@@ -184,9 +184,6 @@ export default function Jukebox() {
               {isAuthenticated ? <Unlock className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
               Admin Controls
             </p>
-            {!isAuthenticated && (
-              <span className="text-xs text-zinc-600">(Password 'A')</span>
-            )}
           </div>
 
           <div className="grid grid-cols-4 gap-3">
