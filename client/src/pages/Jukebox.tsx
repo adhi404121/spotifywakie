@@ -50,34 +50,50 @@ export default function Jukebox() {
   });
 
   useEffect(() => {
-    // 1. Check URL Hash for Token (Redirect back from Spotify)
-    const hash = window.location.hash;
-    if (hash && hash.includes("access_token")) {
-      const params = new URLSearchParams(hash.substring(1));
-      const token = params.get("access_token");
-      if (token) {
-        localStorage.setItem("spotify_access_token", token);
-        window.location.hash = ""; // Clear hash
-        setSpotifyToken(token);
-        setIsAuthenticated(true);
-        fetchNowPlaying(token);
-        toast({
-            title: "Spotify Connected",
-            description: "Jukebox is ready to rock!",
-            className: "text-spotify-green border-spotify-green",
-        });
+    const checkAuth = () => {
+      // 1. Check URL Hash for Token (Redirect back from Spotify)
+      const hash = window.location.hash;
+      if (hash && hash.includes("access_token")) {
+        console.log("Found token in hash");
+        const params = new URLSearchParams(hash.substring(1));
+        const token = params.get("access_token");
+        if (token) {
+          localStorage.setItem("spotify_access_token", token);
+          setSpotifyToken(token);
+          setIsAuthenticated(true);
+          fetchNowPlaying(token);
+          
+          // Clear hash cleanly without reload
+          window.history.pushState("", document.title, window.location.pathname + window.location.search);
+          
+          toast({
+              title: "Spotify Connected Successfully",
+              description: "Token retrieved and saved.",
+              className: "text-spotify-green border-spotify-green",
+          });
+          return;
+        }
       }
-    }
 
-    // 2. Check LocalStorage for existing Token
-    const storedToken = localStorage.getItem("spotify_access_token");
-    if (storedToken) {
-      setSpotifyToken(storedToken);
-      setIsAuthenticated(true); // Auto-admin if token exists
-      fetchNowPlaying(storedToken);
-      const interval = setInterval(() => fetchNowPlaying(storedToken), 5000);
-      return () => clearInterval(interval);
-    }
+      // 2. Check LocalStorage if no hash token
+      const storedToken = localStorage.getItem("spotify_access_token");
+      if (storedToken) {
+        console.log("Found token in localStorage");
+        setSpotifyToken(storedToken);
+        setIsAuthenticated(true); // Auto-admin if token exists
+        fetchNowPlaying(storedToken);
+      }
+    };
+
+    checkAuth();
+    
+    // Polling interval
+    const interval = setInterval(() => {
+      const token = localStorage.getItem("spotify_access_token");
+      if (token) fetchNowPlaying(token);
+    }, 5000);
+    
+    return () => clearInterval(interval);
   }, []);
 
   const handleLogin = () => {
@@ -91,6 +107,15 @@ export default function Jukebox() {
       const res = await fetch("https://api.spotify.com/v1/me/player/currently-playing", {
         headers: { Authorization: `Bearer ${token}` }
       });
+      
+      if (res.status === 401) {
+        // Token expired
+        setSpotifyToken(null);
+        localStorage.removeItem("spotify_access_token");
+        toast({ title: "Session Expired", description: "Please Authenticate Jukebox again.", variant: "destructive" });
+        return;
+      }
+
       if (res.status === 204 || res.status > 400) return;
       
       const data = await res.json();
