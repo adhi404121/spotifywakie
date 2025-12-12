@@ -19,7 +19,7 @@ import {
 const CLIENT_ID = "05ac566290dc43a6b8836c57cb41d440";
 const REDIRECT_URI = window.location.hostname === "localhost" 
   ? "http://localhost:5000/callback" 
-  : "https://spotifywakie.vercel.app/callback";
+  : "https://spotifywakiee.vercel.app/callback";
 // Note: We use Implicit Grant (Client ID only) for frontend-only apps. 
 // Client Secret is NOT used here as it cannot be safely exposed in the browser.
 
