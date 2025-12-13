@@ -1,13 +1,106 @@
 // Vercel serverless function entry point
-// Add immediate log to verify function is loaded
-console.log("[FUNCTION-LOAD] api/index.ts module loaded at", new Date().toISOString());
+// This file bundles the entire Express app for serverless deployment
 
-import { app, initializeApp } from "../server/index";
+import "dotenv/config";
+import express, { type Request, Response, NextFunction } from "express";
+import { createServer } from "http";
 
-// Initialize the app for serverless
+// Import server modules
+import { registerRoutes } from "../server/routes.js";
+import { log } from "../server/index.js";
+
+const app = express();
+
+// Only create httpServer if not in serverless mode
+const httpServer: ReturnType<typeof createServer> | null = process.env.VERCEL ? null : createServer(app);
+
+declare module "http" {
+  interface IncomingMessage {
+    rawBody: unknown;
+  }
+}
+
+app.use(
+  express.json({
+    verify: (req, _res, buf) => {
+      req.rawBody = buf;
+    },
+  }),
+);
+
+app.use(express.urlencoded({ extended: false }));
+
+app.use((req, res, next) => {
+  const start = Date.now();
+  const path = req.path;
+  let capturedJsonResponse: Record<string, any> | undefined = undefined;
+
+  const originalResJson = res.json;
+  res.json = function (bodyJson, ...args) {
+    capturedJsonResponse = bodyJson;
+    return originalResJson.apply(res, [bodyJson, ...args]);
+  };
+
+  res.on("finish", () => {
+    const duration = Date.now() - start;
+    if (path.startsWith("/api")) {
+      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
+      if (capturedJsonResponse) {
+        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+      }
+      log(logLine);
+    }
+  });
+
+  next();
+});
+
+// Initialize the app
 let appInitialized = false;
 let initializationPromise: Promise<void> | null = null;
 
+async function initializeApp() {
+  console.log("[INIT] Starting app initialization...");
+  console.log("[INIT] Environment:", {
+    NODE_ENV: process.env.NODE_ENV,
+    VERCEL: !!process.env.VERCEL,
+    hasClientId: !!process.env.SPOTIFY_CLIENT_ID,
+    hasClientSecret: !!process.env.SPOTIFY_CLIENT_SECRET,
+    hasAdminPassword: !!process.env.ADMIN_PASSWORD
+  });
+
+  try {
+    console.log("[INIT] Registering routes...");
+    await registerRoutes(httpServer, app);
+    console.log("[INIT] Routes registered successfully");
+
+    app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+      const status = err.status || err.statusCode || 500;
+      const message = err.message || "Internal Server Error";
+
+      console.error("[EXPRESS ERROR]", {
+        status,
+        message,
+        path: _req.path,
+        method: _req.method,
+        stack: err.stack
+      });
+
+      if (!res.headersSent) {
+        res.status(status).json({ message });
+      }
+    });
+    console.log("[INIT] Error handler registered");
+  } catch (error: any) {
+    console.error("[INIT] Initialization error:", {
+      message: error.message,
+      stack: error.stack
+    });
+    throw error;
+  }
+}
+
+// Vercel serverless function handler
 export default async function handler(req: any, res: any) {
   const startTime = Date.now();
   const requestId = Math.random().toString(36).substring(7);
@@ -26,7 +119,7 @@ export default async function handler(req: any, res: any) {
   });
 
   try {
-    // Ensure initialization happens only once, even with concurrent requests
+    // Ensure initialization happens only once
     if (!appInitialized) {
       console.log(`[${requestId}] App not initialized, starting initialization...`);
       if (!initializationPromise) {
@@ -86,7 +179,6 @@ export default async function handler(req: any, res: any) {
       name: error?.name,
       duration: Date.now() - startTime
     });
-    // Only send response if headers haven't been sent
     if (!res.headersSent) {
       console.log(`[${requestId}] Sending error response (headers not sent)`);
       res.status(500).json({ 
@@ -99,4 +191,3 @@ export default async function handler(req: any, res: any) {
     }
   }
 }
-
