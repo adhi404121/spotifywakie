@@ -60,7 +60,8 @@ app.use((req, res, next) => {
   next();
 });
 
-(async () => {
+// Initialize the app (for both server and serverless)
+export async function initializeApp() {
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
@@ -80,26 +81,36 @@ app.use((req, res, next) => {
     const { setupVite } = await import("./vite");
     await setupVite(httpServer, app);
   }
+}
 
-  // ALWAYS serve the app on the port specified in the environment variable PORT
-  // Default to 8089 for local development
-  // this serves both the API and the client.
-  const port = parseInt(process.env.PORT || "8089", 10);
-  const isWindows = process.platform === "win32";
-  
-  // Windows doesn't support reusePort option
-  // Use 127.0.0.1 instead of localhost to avoid IPv6 binding issues
-  const listenOptions = isWindows
-    ? { port, host: "127.0.0.1" }
-    : { port, host: "0.0.0.0", reusePort: true };
-  
-  httpServer.listen(listenOptions, () => {
-    log(`serving on port ${port}`);
-  }).on("error", (err: NodeJS.ErrnoException) => {
-    if (err.code === "EACCES" || err.code === "EADDRINUSE") {
-      log(`Port ${port} is not available. Try a different port by setting PORT environment variable.`, "error");
-      log(`Example: PORT=3001 npm run dev`, "error");
-    }
-    throw err;
-  });
-})();
+// Only start listening if not in serverless mode (Vercel)
+if (!process.env.VERCEL) {
+  (async () => {
+    await initializeApp();
+
+    // ALWAYS serve the app on the port specified in the environment variable PORT
+    // Default to 8089 for local development
+    // this serves both the API and the client.
+    const port = parseInt(process.env.PORT || "8089", 10);
+    const isWindows = process.platform === "win32";
+    
+    // Windows doesn't support reusePort option
+    // Use 127.0.0.1 instead of localhost to avoid IPv6 binding issues
+    const listenOptions = isWindows
+      ? { port, host: "127.0.0.1" }
+      : { port, host: "0.0.0.0", reusePort: true };
+    
+    httpServer.listen(listenOptions, () => {
+      log(`serving on port ${port}`);
+    }).on("error", (err: NodeJS.ErrnoException) => {
+      if (err.code === "EACCES" || err.code === "EADDRINUSE") {
+        log(`Port ${port} is not available. Try a different port by setting PORT environment variable.`, "error");
+        log(`Example: PORT=3001 npm run dev`, "error");
+      }
+      throw err;
+    });
+  })();
+}
+
+// Export app for Vercel serverless functions
+export { app };
