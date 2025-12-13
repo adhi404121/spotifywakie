@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import { storage, spotifyTokens } from "./storage";
-import { log } from "./index";
+import { storage, spotifyTokens } from "./storage.js";
+import { log } from "./index.js";
 
 const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID || "";
 const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET || "";
@@ -168,6 +168,19 @@ export async function registerRoutes(
         res.status(500).json({ error: errorMessage, requestId });
       }
     }
+  });
+
+  // Test endpoint to verify serverless function is working
+  app.get("/api/test", (req, res) => {
+    console.log("[TEST] Test endpoint called");
+    res.json({ 
+      message: "Serverless function is working!",
+      timestamp: new Date().toISOString(),
+      environment: {
+        vercel: !!process.env.VERCEL,
+        nodeEnv: process.env.NODE_ENV
+      }
+    });
   });
 
   // Check if server is authenticated
