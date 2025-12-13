@@ -10,19 +10,26 @@ export default async function handler(req: any, res: any) {
     // Ensure initialization happens only once, even with concurrent requests
     if (!appInitialized) {
       if (!initializationPromise) {
-        initializationPromise = initializeApp();
+        initializationPromise = initializeApp().catch((err) => {
+          console.error("Failed to initialize app:", err);
+          throw err;
+        });
       }
       await initializationPromise;
       appInitialized = true;
     }
     
+    // Call Express app with Vercel's request/response
     return app(req, res);
   } catch (error: any) {
     console.error("Serverless function error:", error);
-    res.status(500).json({ 
-      error: "Internal server error",
-      message: error?.message || "Unknown error"
-    });
+    // Only send response if headers haven't been sent
+    if (!res.headersSent) {
+      res.status(500).json({ 
+        error: "Internal server error",
+        message: error?.message || "Unknown error"
+      });
+    }
   }
 }
 

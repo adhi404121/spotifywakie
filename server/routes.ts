@@ -88,9 +88,9 @@ async function refreshAccessToken(refreshToken: string) {
 }
 
 export async function registerRoutes(
-  httpServer: Server,
+  httpServer: Server | null,
   app: Express
-): Promise<Server> {
+): Promise<Server | null> {
   // Server-side Spotify OAuth token exchange endpoint (one-time setup)
   app.post("/api/spotify/token", async (req, res) => {
     try {
@@ -137,11 +137,20 @@ export async function registerRoutes(
 
   // Check if server is authenticated
   app.get("/api/spotify/status", async (req, res) => {
-    const token = await getValidServerToken();
-    res.json({
-      authenticated: !!token,
-      hasToken: !!spotifyTokens.getAccessToken(),
-    });
+    try {
+      const token = await getValidServerToken();
+      res.json({
+        authenticated: !!token,
+        hasToken: !!spotifyTokens.getAccessToken(),
+      });
+    } catch (error: any) {
+      log(`Status endpoint error: ${error.message}`, "spotify");
+      res.status(500).json({ 
+        error: "Failed to check authentication status",
+        authenticated: false,
+        hasToken: false
+      });
+    }
   });
 
   // Add song to queue (no authentication required for users)
@@ -316,5 +325,5 @@ export async function registerRoutes(
     }
   });
 
-  return httpServer;
+  return httpServer || null;
 }

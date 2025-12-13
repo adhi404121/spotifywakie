@@ -22,37 +22,37 @@ export default defineConfig(async () => {
   return {
     // Explicitly set env file directory to project root
     envDir: path.resolve(import.meta.dirname),
-    plugins: [
-      react(),
-      runtimeErrorOverlay(),
-      tailwindcss(),
-      metaImagesPlugin(),
+  plugins: [
+    react(),
+    runtimeErrorOverlay(),
+    tailwindcss(),
+    metaImagesPlugin(),
       ...replitPlugins,
-    ],
-    resolve: {
-      alias: {
-        "@": path.resolve(import.meta.dirname, "client", "src"),
-        "@shared": path.resolve(import.meta.dirname, "shared"),
-        "@assets": path.resolve(import.meta.dirname, "attached_assets"),
-      },
+  ],
+  resolve: {
+    alias: {
+      "@": path.resolve(import.meta.dirname, "client", "src"),
+      "@shared": path.resolve(import.meta.dirname, "shared"),
+      "@assets": path.resolve(import.meta.dirname, "attached_assets"),
     },
-    css: {
-      postcss: {
-        plugins: [],
-      },
+  },
+  css: {
+    postcss: {
+      plugins: [],
     },
-    root: path.resolve(import.meta.dirname, "client"),
-    build: {
-      outDir: path.resolve(import.meta.dirname, "dist/public"),
-      emptyOutDir: true,
-    },
-    server: {
+  },
+  root: path.resolve(import.meta.dirname, "client"),
+  build: {
+    outDir: path.resolve(import.meta.dirname, "dist/public"),
+    emptyOutDir: true,
+  },
+  server: {
       host: process.platform === "win32" ? "127.0.0.1" : "0.0.0.0",
-      allowedHosts: true,
-      fs: {
-        strict: true,
-        deny: ["**/.*"],
-      },
+    allowedHosts: true,
+    fs: {
+      strict: true,
+      deny: ["**/.*"],
     },
+  },
   };
 });

@@ -5,7 +5,8 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 
 const app = express();
-const httpServer = createServer(app);
+// Only create httpServer if not in serverless mode
+const httpServer: ReturnType<typeof createServer> | null = process.env.VERCEL ? null : createServer(app);
 
 declare module "http" {
   interface IncomingMessage {
@@ -62,14 +63,16 @@ app.use((req, res, next) => {
 
 // Initialize the app (for both server and serverless)
 export async function initializeApp() {
+  // Pass null for httpServer in serverless mode
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
 
+    // Don't throw after sending response - just log
     res.status(status).json({ message });
-    throw err;
+    console.error("Express error:", err);
   });
 
   // Only setup static/vite for traditional server mode, not serverless
@@ -81,7 +84,9 @@ export async function initializeApp() {
       serveStatic(app);
     } else {
       const { setupVite } = await import("./vite");
-      await setupVite(httpServer, app);
+      if (httpServer) {
+        await setupVite(httpServer, app);
+      }
     }
   }
 }
