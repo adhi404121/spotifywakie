@@ -136,9 +136,10 @@ if (!process.env.VERCEL) {
       ? { port, host: "127.0.0.1" }
       : { port, host: "0.0.0.0", reusePort: true };
     
-    httpServer.listen(listenOptions, () => {
-      log(`serving on port ${port}`);
-    }).on("error", (err: NodeJS.ErrnoException) => {
+    if (httpServer) {
+      httpServer.listen(listenOptions, () => {
+        log(`serving on port ${port}`);
+      }).on("error", (err: NodeJS.ErrnoException) => {
       if (err.code === "EACCES" || err.code === "EADDRINUSE") {
         log(`Port ${port} is not available. Try a different port by setting PORT environment variable.`, "error");
         log(`Example: PORT=3001 npm run dev`, "error");
