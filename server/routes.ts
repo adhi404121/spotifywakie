@@ -211,8 +211,12 @@ export async function registerRoutes(
       const { action, volume } = req.body;
       const { password } = req.headers;
 
-      // Simple password check (you can improve this)
-      const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "A";
+      // Password check - must be set in environment variables
+      const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+      if (!ADMIN_PASSWORD) {
+        log("ERROR: ADMIN_PASSWORD not configured", "spotify");
+        return res.status(500).json({ error: "Server configuration error: Admin password not set" });
+      }
       if (password !== ADMIN_PASSWORD) {
         return res.status(401).json({ error: "Unauthorized" });
       }

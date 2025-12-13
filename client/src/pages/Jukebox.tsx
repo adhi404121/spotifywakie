@@ -17,10 +17,7 @@ import {
 
 // Configuration - Load from environment variables
 const CLIENT_ID = import.meta.env.VITE_SPOTIFY_CLIENT_ID || "";
-const REDIRECT_URI = import.meta.env.VITE_SPOTIFY_REDIRECT_URI || 
-  (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
-    ? "http://127.0.0.1:8089/" 
-    : "https://spotifywakiee.vercel.app/");
+const REDIRECT_URI = import.meta.env.VITE_SPOTIFY_REDIRECT_URI || "";
 const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || "";
 
 // Using Authorization Code flow for automatic token refresh
@@ -83,10 +80,11 @@ export default function Jukebox() {
             // One-time server authentication
             setIsRedirecting(true);
             try {
-              const actualRedirectUri = REDIRECT_URI.trim() || 
-                (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
-                  ? "http://127.0.0.1:8089/"
-                  : window.location.origin + "/");
+              const actualRedirectUri = REDIRECT_URI.trim();
+              
+              if (!actualRedirectUri) {
+                throw new Error("Redirect URI is not configured. Please set VITE_SPOTIFY_REDIRECT_URI in environment variables.");
+              }
               
               const res = await fetch("/api/spotify/token", {
                 method: "POST",
@@ -142,15 +140,21 @@ export default function Jukebox() {
 
   const handleServerLogin = () => {
     // One-time server authentication setup
-    const redirectUri = REDIRECT_URI.trim() || 
-      (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
-        ? "http://127.0.0.1:8089/"
-        : window.location.origin + "/");
+    const redirectUri = REDIRECT_URI.trim();
     
     if (!CLIENT_ID) {
       toast({
         title: "Configuration Error",
         description: "Spotify Client ID is not configured.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    if (!redirectUri) {
+      toast({
+        title: "Configuration Error",
+        description: "Redirect URI is not configured. Please set VITE_SPOTIFY_REDIRECT_URI in environment variables.",
         variant: "destructive",
       });
       return;
