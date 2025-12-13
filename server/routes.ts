@@ -1,0 +1,316 @@
+import type { Express } from "express";
+import { createServer, type Server } from "http";
+import { storage, spotifyTokens } from "./storage";
+import { log } from "./index";
+
+const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID || "";
+const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET || "";
+
+// Get valid access token (refresh if needed)
+async function getValidServerToken(): Promise<string | null> {
+  if (!spotifyTokens.getAccessToken()) {
+    return null;
+  }
+
+  // Check if token needs refresh
+  if (spotifyTokens.isTokenExpired()) {
+    const refreshToken = spotifyTokens.getRefreshToken();
+    if (!refreshToken) {
+      return null;
+    }
+
+    try {
+      log("Refreshing server Spotify token...", "spotify");
+      const tokens = await refreshAccessToken(refreshToken);
+      spotifyTokens.setTokens(
+        tokens.access_token,
+        tokens.refresh_token || refreshToken,
+        tokens.expires_in || 3600
+      );
+      return tokens.access_token;
+    } catch (error: any) {
+      log(`Token refresh failed: ${error.message}`, "spotify");
+      spotifyTokens.clearTokens();
+      return null;
+    }
+  }
+
+  return spotifyTokens.getAccessToken();
+}
+
+// Helper function to exchange authorization code for tokens
+async function exchangeCodeForTokens(code: string, redirectUri: string) {
+  const authString = Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString("base64");
+  
+  const response = await fetch("https://accounts.spotify.com/api/token", {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${authString}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: redirectUri,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error_description || error.error || "Token exchange failed");
+  }
+
+  return await response.json();
+}
+
+// Helper function to refresh access token
+async function refreshAccessToken(refreshToken: string) {
+  const authString = Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString("base64");
+  
+  const response = await fetch("https://accounts.spotify.com/api/token", {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${authString}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error_description || error.error || "Token refresh failed");
+  }
+
+  return await response.json();
+}
+
+export async function registerRoutes(
+  httpServer: Server,
+  app: Express
+): Promise<Server> {
+  // Server-side Spotify OAuth token exchange endpoint (one-time setup)
+  app.post("/api/spotify/token", async (req, res) => {
+    try {
+      const { code, redirectUri } = req.body;
+
+      if (!code || !redirectUri) {
+        return res.status(400).json({ error: "Missing code or redirectUri" });
+      }
+
+      if (!CLIENT_ID || !CLIENT_SECRET) {
+        log("ERROR: SPOTIFY_CLIENT_ID or SPOTIFY_CLIENT_SECRET not configured", "spotify");
+        return res.status(500).json({ error: "Server configuration error" });
+      }
+
+      // Normalize redirect URI - ensure it matches exactly what's in Spotify Console
+      const normalizedRedirectUri = redirectUri.trim();
+      log(`Server token exchange - using redirect URI: ${normalizedRedirectUri}`, "spotify");
+
+      const tokens = await exchangeCodeForTokens(code, normalizedRedirectUri);
+
+      // Store tokens server-side
+      spotifyTokens.setTokens(
+        tokens.access_token,
+        tokens.refresh_token,
+        tokens.expires_in || 3600
+      );
+
+      log("Server Spotify tokens stored successfully", "spotify");
+
+      res.json({
+        success: true,
+        message: "Server authenticated with Spotify successfully",
+        expires_in: tokens.expires_in,
+      });
+    } catch (error: any) {
+      log(`Token exchange error: ${error.message}`, "spotify");
+      const errorMessage = error.message || "Token exchange failed";
+      if (errorMessage.includes("redirect_uri")) {
+        log(`IMPORTANT: Redirect URI mismatch. Make sure '${req.body.redirectUri}' is exactly added in Spotify Developer Console`, "spotify");
+      }
+      res.status(500).json({ error: errorMessage });
+    }
+  });
+
+  // Check if server is authenticated
+  app.get("/api/spotify/status", async (req, res) => {
+    const token = await getValidServerToken();
+    res.json({
+      authenticated: !!token,
+      hasToken: !!spotifyTokens.getAccessToken(),
+    });
+  });
+
+  // Add song to queue (no authentication required for users)
+  app.post("/api/spotify/queue", async (req, res) => {
+    try {
+      const { songName, uri } = req.body;
+
+      if (!songName && !uri) {
+        return res.status(400).json({ error: "Missing songName or uri" });
+      }
+
+      const accessToken = await getValidServerToken();
+      if (!accessToken) {
+        return res.status(401).json({ 
+          error: "Server not authenticated with Spotify. Please authenticate the server first." 
+        });
+      }
+
+      let trackUri = uri;
+
+      // If song name provided, search for it
+      if (songName && !uri) {
+        const searchRes = await fetch(
+          `https://api.spotify.com/v1/search?q=${encodeURIComponent(songName)}&type=track&limit=1`,
+          {
+            headers: { Authorization: `Bearer ${accessToken}` },
+          }
+        );
+
+        if (!searchRes.ok) {
+          const error = await searchRes.json().catch(() => ({}));
+          throw new Error(error.error?.message || "Search failed");
+        }
+
+        const searchData = await searchRes.json();
+        if (!searchData.tracks?.items?.length) {
+          return res.status(404).json({ error: `Song not found: ${songName}` });
+        }
+
+        trackUri = searchData.tracks.items[0].uri;
+      }
+
+      // Add to queue
+      const queueRes = await fetch(
+        `https://api.spotify.com/v1/me/player/queue?uri=${encodeURIComponent(trackUri)}`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${accessToken}` },
+        }
+      );
+
+      if (!queueRes.ok && queueRes.status !== 204) {
+        const error = await queueRes.json().catch(() => ({}));
+        throw new Error(error.error?.message || "Failed to add song to queue");
+      }
+
+      res.json({ success: true, message: "Song added to queue" });
+    } catch (error: any) {
+      log(`Queue error: ${error.message}`, "spotify");
+      res.status(500).json({ error: error.message || "Failed to add song" });
+    }
+  });
+
+  // Control playback (admin only - requires password)
+  app.post("/api/spotify/control", async (req, res) => {
+    try {
+      const { action, volume } = req.body;
+      const { password } = req.headers;
+
+      // Simple password check (you can improve this)
+      const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "A";
+      if (password !== ADMIN_PASSWORD) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
+      const accessToken = await getValidServerToken();
+      if (!accessToken) {
+        return res.status(401).json({ 
+          error: "Server not authenticated with Spotify" 
+        });
+      }
+
+      let response;
+      switch (action) {
+        case "play":
+          response = await fetch("https://api.spotify.com/v1/me/player/play", {
+            method: "PUT",
+            headers: { Authorization: `Bearer ${accessToken}` },
+          });
+          break;
+        case "pause":
+          response = await fetch("https://api.spotify.com/v1/me/player/pause", {
+            method: "PUT",
+            headers: { Authorization: `Bearer ${accessToken}` },
+          });
+          break;
+        case "next":
+          response = await fetch("https://api.spotify.com/v1/me/player/next", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${accessToken}` },
+          });
+          break;
+        case "volume":
+          if (volume === undefined) {
+            return res.status(400).json({ error: "Volume value required" });
+          }
+          response = await fetch(
+            `https://api.spotify.com/v1/me/player/volume?volume_percent=${volume}`,
+            {
+              method: "PUT",
+              headers: { Authorization: `Bearer ${accessToken}` },
+            }
+          );
+          break;
+        default:
+          return res.status(400).json({ error: "Invalid action" });
+      }
+
+      if (!response.ok && response.status !== 204) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.error?.message || "Control action failed");
+      }
+
+      res.json({ success: true, message: `Action ${action} completed` });
+    } catch (error: any) {
+      log(`Control error: ${error.message}`, "spotify");
+      res.status(500).json({ error: error.message || "Control action failed" });
+    }
+  });
+
+  // Get currently playing (no auth required)
+  app.get("/api/spotify/now-playing", async (req, res) => {
+    try {
+      const accessToken = await getValidServerToken();
+      if (!accessToken) {
+        return res.json({ playing: false, track: null });
+      }
+
+      const response = await fetch(
+        "https://api.spotify.com/v1/me/player/currently-playing",
+        {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        }
+      );
+
+      if (response.status === 204) {
+        return res.json({ playing: false, track: null });
+      }
+
+      if (!response.ok) {
+        return res.json({ playing: false, track: null });
+      }
+
+      const data = await response.json();
+      res.json({
+        playing: data.is_playing || false,
+        track: data.item
+          ? {
+              name: data.item.name,
+              artist: data.item.artists.map((a: any) => a.name).join(", "),
+              image: data.item.album.images[0]?.url,
+            }
+          : null,
+      });
+    } catch (error: any) {
+      log(`Now playing error: ${error.message}`, "spotify");
+      res.json({ playing: false, track: null });
+    }
+  });
+
+  return httpServer;
+}
