@@ -1,4 +1,7 @@
 // Vercel serverless function entry point
+// Add immediate log to verify function is loaded
+console.log("[FUNCTION-LOAD] api/index.ts module loaded at", new Date().toISOString());
+
 import { app, initializeApp } from "../server/index";
 
 // Initialize the app for serverless
