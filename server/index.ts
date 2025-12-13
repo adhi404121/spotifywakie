@@ -96,19 +96,26 @@ export async function initializeApp() {
     });
     console.log("[INIT] Error handler registered");
 
-  // Only setup static/vite for traditional server mode, not serverless
-  if (!process.env.VERCEL) {
-    // importantly only setup vite in development and after
-    // setting up all the other routes so the catch-all route
-    // doesn't interfere with the other routes
-    if (process.env.NODE_ENV === "production") {
-      serveStatic(app);
-    } else {
-      const { setupVite } = await import("./vite");
-      if (httpServer) {
-        await setupVite(httpServer, app);
+    // Only setup static/vite for traditional server mode, not serverless
+    if (!process.env.VERCEL) {
+      // importantly only setup vite in development and after
+      // setting up all the other routes so the catch-all route
+      // doesn't interfere with the other routes
+      if (process.env.NODE_ENV === "production") {
+        serveStatic(app);
+      } else {
+        const { setupVite } = await import("./vite");
+        if (httpServer) {
+          await setupVite(httpServer, app);
+        }
       }
     }
+  } catch (error: any) {
+    console.error("[INIT] Initialization error:", {
+      message: error.message,
+      stack: error.stack
+    });
+    throw error;
   }
 }
 
