@@ -1,3 +1,4 @@
+import "dotenv/config";
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
@@ -81,18 +82,24 @@ app.use((req, res, next) => {
   }
 
   // ALWAYS serve the app on the port specified in the environment variable PORT
-  // Other ports are firewalled. Default to 5000 if not specified.
+  // Default to 8089 for local development
   // this serves both the API and the client.
-  // It is the only port that is not firewalled.
-  const port = parseInt(process.env.PORT || "5000", 10);
-  httpServer.listen(
-    {
-      port,
-      host: "0.0.0.0",
-      reusePort: true,
-    },
-    () => {
-      log(`serving on port ${port}`);
-    },
-  );
+  const port = parseInt(process.env.PORT || "8089", 10);
+  const isWindows = process.platform === "win32";
+  
+  // Windows doesn't support reusePort option
+  // Use 127.0.0.1 instead of localhost to avoid IPv6 binding issues
+  const listenOptions = isWindows
+    ? { port, host: "127.0.0.1" }
+    : { port, host: "0.0.0.0", reusePort: true };
+  
+  httpServer.listen(listenOptions, () => {
+    log(`serving on port ${port}`);
+  }).on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EACCES" || err.code === "EADDRINUSE") {
+      log(`Port ${port} is not available. Try a different port by setting PORT environment variable.`, "error");
+      log(`Example: PORT=3001 npm run dev`, "error");
+    }
+    throw err;
+  });
 })();

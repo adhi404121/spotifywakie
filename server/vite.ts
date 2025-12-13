@@ -15,8 +15,11 @@ export async function setupVite(server: Server, app: Express) {
     allowedHosts: true as const,
   };
 
+  // viteConfig is an async function, so we need to await it
+  const config = await viteConfig();
+
   const vite = await createViteServer({
-    ...viteConfig,
+    ...config,
     configFile: false,
     customLogger: {
       ...viteLogger,

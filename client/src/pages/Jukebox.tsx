@@ -15,21 +15,22 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 
-// Configuration
-const CLIENT_ID = "05ac566290dc43a6b8836c57cb41d440";
-const REDIRECT_URI = window.location.hostname === "localhost" 
-  ? "http://localhost:5000/" 
-  : "https://spotifywakiee.vercel.app/";
-// Note: We use Implicit Grant (Client ID only) for frontend-only apps. 
-// Client Secret is NOT used here as it cannot be safely exposed in the browser.
+// Configuration - Load from environment variables
+const CLIENT_ID = import.meta.env.VITE_SPOTIFY_CLIENT_ID || "";
+const REDIRECT_URI = import.meta.env.VITE_SPOTIFY_REDIRECT_URI || 
+  (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+    ? "http://127.0.0.1:8089/" 
+    : "https://spotifywakiee.vercel.app/");
+const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || "";
 
+// Using Authorization Code flow for automatic token refresh
 const SCOPES = [
   "user-modify-playback-state",
   "user-read-playback-state",
   "user-read-currently-playing"
 ];
 
-const ADMIN_PASSWORD = "A";
+// Server-side authentication - no client-side token storage needed
 
 export default function Jukebox() {
   const { toast } = useToast();
@@ -38,7 +39,9 @@ export default function Jukebox() {
   const [showPasswordPrompt, setShowPasswordPrompt] = useState(false);
   const [passwordInput, setPasswordInput] = useState("");
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
-  const [spotifyToken, setSpotifyToken] = useState<string | null>(null);
+  const [spotifyToken, setSpotifyToken] = useState<string | null>(null); // Just a flag: "server-authenticated" or null
+  const [isRedirecting, setIsRedirecting] = useState(false);
+  const [adminPassword, setAdminPassword] = useState<string | null>(null); // Store entered password
   
   // State for UI
   const [isPlaying, setIsPlaying] = useState(false);
@@ -50,167 +53,257 @@ export default function Jukebox() {
   });
 
   useEffect(() => {
-    // 0. Force Token Reset if Client ID changed
-    const lastClientId = localStorage.getItem("last_client_id");
-    if (lastClientId !== CLIENT_ID) {
-      console.log("Client ID changed, clearing old tokens...");
-      localStorage.removeItem("spotify_access_token");
-      localStorage.setItem("last_client_id", CLIENT_ID);
-      setSpotifyToken(null);
-      setIsAuthenticated(false);
-    }
-
-    const checkAuth = () => {
-      // 1. Check URL Hash for Token (Redirect back from Spotify)
-      const hash = window.location.hash;
-      if (hash && hash.includes("access_token")) {
-        console.log("Found token in hash");
-        const params = new URLSearchParams(hash.substring(1));
-        const token = params.get("access_token");
-        if (token) {
-          localStorage.setItem("spotify_access_token", token);
-          setSpotifyToken(token);
+    const checkServerAuth = async () => {
+      // Check if server is authenticated with Spotify
+      try {
+        const res = await fetch("/api/spotify/status");
+        const data = await res.json();
+        
+        if (data.authenticated) {
+          setSpotifyToken("server-authenticated"); // Just a flag
           setIsAuthenticated(true);
-          fetchNowPlaying(token);
-          
-          // Clear hash cleanly without reload
-          window.history.pushState("", document.title, window.location.pathname + window.location.search);
-          
-          toast({
-              title: "Spotify Connected Successfully",
-              description: "Token retrieved and saved.",
-              className: "text-spotify-green border-spotify-green",
-          });
-          return;
-        }
-      }
+          fetchNowPlaying();
+        } else {
+          // Check URL for authorization code (one-time server setup)
+          const urlParams = new URLSearchParams(window.location.search);
+          const code = urlParams.get("code");
+          const error = urlParams.get("error");
 
-      // 2. Check LocalStorage if no hash token
-      const storedToken = localStorage.getItem("spotify_access_token");
-      if (storedToken) {
-        console.log("Found token in localStorage");
-        setSpotifyToken(storedToken);
-        setIsAuthenticated(true); // Auto-admin if token exists
-        fetchNowPlaying(storedToken);
+          if (error) {
+            toast({
+              title: "Authentication Error",
+              description: "Failed to authenticate server with Spotify.",
+              variant: "destructive",
+            });
+            window.history.replaceState({}, document.title, window.location.pathname);
+            return;
+          }
+
+          if (code && CLIENT_ID) {
+            // One-time server authentication
+            setIsRedirecting(true);
+            try {
+              const actualRedirectUri = REDIRECT_URI.trim() || 
+                (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+                  ? "http://127.0.0.1:8089/"
+                  : window.location.origin + "/");
+              
+              const res = await fetch("/api/spotify/token", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ code, redirectUri: actualRedirectUri }),
+              });
+
+              if (!res.ok) {
+                const errorData = await res.json().catch(() => ({}));
+                throw new Error(errorData.error || "Token exchange failed");
+              }
+
+              toast({
+                title: "Server Authenticated!",
+                description: "Jukebox is now connected to Spotify.",
+                className: "text-spotify-green border-spotify-green",
+              });
+              
+              window.history.replaceState({}, document.title, window.location.pathname);
+              setSpotifyToken("server-authenticated");
+              setIsAuthenticated(true);
+              fetchNowPlaying();
+            } catch (error: any) {
+              console.error("Server auth error:", error);
+              toast({
+                title: "Authentication Failed",
+                description: error.message || "Failed to authenticate server",
+                variant: "destructive",
+              });
+              setIsRedirecting(false);
+            }
+          } else if (!data.hasToken && CLIENT_ID) {
+            // Server not authenticated - show setup message
+            console.log("Server not authenticated. Admin needs to setup.");
+          }
+        }
+      } catch (e) {
+        console.error("Error checking server auth:", e);
       }
     };
 
-    checkAuth();
+    checkServerAuth();
     
-    // Polling interval
+    // Poll for now playing every 5 seconds
     const interval = setInterval(() => {
-      const token = localStorage.getItem("spotify_access_token");
-      if (token) fetchNowPlaying(token);
+      if (spotifyToken) {
+        fetchNowPlaying();
+      }
     }, 5000);
     
     return () => clearInterval(interval);
   }, []);
 
-  const handleLogin = () => {
-    // Implicit Grant Flow
-    const authUrl = `https://accounts.spotify.com/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${encodeURIComponent(SCOPES.join(" "))}&response_type=token&show_dialog=true`;
+  const handleServerLogin = () => {
+    // One-time server authentication setup
+    const redirectUri = REDIRECT_URI.trim() || 
+      (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+        ? "http://127.0.0.1:8089/"
+        : window.location.origin + "/");
+    
+    if (!CLIENT_ID) {
+      toast({
+        title: "Configuration Error",
+        description: "Spotify Client ID is not configured.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    setIsRedirecting(true);
+    const authUrl = `https://accounts.spotify.com/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(SCOPES.join(" "))}&response_type=code&show_dialog=true`;
     window.location.href = authUrl;
   };
 
-  const fetchNowPlaying = async (token: string) => {
+  const fetchNowPlaying = async () => {
     try {
-      const res = await fetch("https://api.spotify.com/v1/me/player/currently-playing", {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      
-      if (res.status === 401) {
-        // Token expired
-        setSpotifyToken(null);
-        localStorage.removeItem("spotify_access_token");
-        toast({ title: "Session Expired", description: "Please Authenticate Jukebox again.", variant: "destructive" });
-        return;
-      }
-
-      if (res.status === 204 || res.status > 400) return;
-      
+      // Use server endpoint
+      const res = await fetch("/api/spotify/now-playing");
       const data = await res.json();
-      if (data && data.item) {
+      
+      if (data.track) {
         setCurrentTrack({
-          name: data.item.name,
-          artist: data.item.artists.map((a: any) => a.name).join(", "),
-          image: data.item.album.images[0]?.url
+          name: data.track.name,
+          artist: data.track.artist,
+          image: data.track.image
         });
-        setIsPlaying(data.is_playing);
+        setIsPlaying(data.playing);
+      } else {
+        setCurrentTrack({
+          name: "Ready to Play",
+          artist: "Queue a song to start",
+          image: null
+        });
+        setIsPlaying(false);
       }
     } catch (e) {
       console.error("Error fetching now playing", e);
     }
   };
 
-  const spotifyApiCall = async (endpoint: string, method: string = "POST", body?: any) => {
-    if (!spotifyToken) {
-      toast({ title: "Not Connected", description: "Please login to Spotify first.", variant: "destructive" });
-      return;
+  const spotifyApiCall = async (action: string, volume?: number) => {
+    // Only use password if user is authenticated (entered password in dialog)
+    if (!isAuthenticated || !adminPassword) {
+      toast({ 
+        title: "Authentication Required", 
+        description: "Please enter admin password first.", 
+        variant: "destructive" 
+      });
+      return { success: false };
     }
 
     try {
-      const res = await fetch(`https://api.spotify.com/v1/me/player/${endpoint}`, {
-        method,
+      const res = await fetch("/api/spotify/control", {
+        method: "POST",
         headers: { 
-          Authorization: `Bearer ${spotifyToken}`,
-          "Content-Type": "application/json"
+          "Content-Type": "application/json",
+          "password": adminPassword
         },
-        body: body ? JSON.stringify(body) : undefined
+        body: JSON.stringify({ action, volume }),
       });
 
-      if (res.ok) {
-        toast({ title: "Success", className: "text-spotify-green border-spotify-green" });
-        setTimeout(() => fetchNowPlaying(spotifyToken), 500); // Refresh state
-      } else {
-        const err = await res.json();
-        toast({ title: "Error", description: err.error?.message || "Command failed", variant: "destructive" });
+      const data = await res.json();
+
+      if (!res.ok) {
+        let errorMessage = data.error || "Command failed";
+        
+        // Show helpful message if server not authenticated
+        if (data.error && data.error.includes("Server not authenticated with Spotify")) {
+          errorMessage = "Server needs Spotify authentication. Click 'Setup Server' button first.";
+        }
+        
+        toast({ 
+          title: "Error", 
+          description: errorMessage, 
+          variant: "destructive" 
+        });
+        return { success: false };
       }
+
+      toast({ title: "Success", className: "text-spotify-green border-spotify-green" });
+      setTimeout(() => fetchNowPlaying(), 500);
+      return { success: true };
     } catch (e) {
-      toast({ title: "Network Error", variant: "destructive" });
+      console.error("Control error:", e);
+      toast({ title: "Network Error", description: "Failed to control playback", variant: "destructive" });
+      return { success: false };
     }
   };
 
   const handleQueueSong = async () => {
-    if (!songInput.trim()) return;
-
-    // Determine if URI or Search
-    let uri = songInput.trim();
-    if (!uri.startsWith("spotify:track:")) {
-      // Basic search to get URI (requires token)
-       if (spotifyToken) {
-         const searchRes = await fetch(`https://api.spotify.com/v1/search?q=${encodeURIComponent(songInput)}&type=track&limit=1`, {
-            headers: { Authorization: `Bearer ${spotifyToken}` }
-         });
-         const searchData = await searchRes.json();
-         if (searchData.tracks.items.length > 0) {
-           uri = searchData.tracks.items[0].uri;
-           toast({ description: `Found: ${searchData.tracks.items[0].name}` });
-         } else {
-           toast({ title: "Not Found", variant: "destructive" });
-           return;
-         }
-       } else {
-          toast({ title: "Login Required", description: "Admin must login to search songs.", variant: "destructive" });
-          return;
-       }
+    if (!songInput.trim()) {
+      toast({ title: "Empty Input", description: "Please enter a song name or Spotify URI", variant: "destructive" });
+      return;
     }
 
-    await spotifyApiCall(`queue?uri=${uri}`);
-    setSongInput("");
+    try {
+      // Use server endpoint - no authentication required for users
+      const res = await fetch("/api/spotify/queue", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          songName: songInput.trim().startsWith("spotify:track:") ? undefined : songInput.trim(),
+          uri: songInput.trim().startsWith("spotify:track:") ? songInput.trim() : undefined
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        toast({ 
+          title: "Error", 
+          description: data.error || "Failed to add song to queue", 
+          variant: "destructive" 
+        });
+        return;
+      }
+
+      toast({ 
+        title: "Success", 
+        description: "Song added to queue!", 
+        className: "text-spotify-green border-spotify-green" 
+      });
+      setSongInput("");
+      
+      // Refresh now playing
+      setTimeout(() => fetchNowPlaying(), 500);
+    } catch (e) {
+      console.error("Queue error:", e);
+      toast({ title: "Network Error", description: "Failed to add song", variant: "destructive" });
+    }
   };
 
   const executeAdminAction = (action: () => void) => {
-    if (isAuthenticated) {
+    console.log("executeAdminAction called, isAuthenticated:", isAuthenticated);
+    if (isAuthenticated && adminPassword) {
       action();
     } else {
+      console.log("Showing password prompt");
       setPendingAction(() => action);
       setShowPasswordPrompt(true);
     }
   };
 
   const handlePasswordSubmit = () => {
+    if (!ADMIN_PASSWORD) {
+      toast({
+        title: "Configuration Error",
+        description: "Admin password not configured in .env file.",
+        variant: "destructive",
+      });
+      setPasswordInput("");
+      return;
+    }
+
     if (passwordInput === ADMIN_PASSWORD) {
       setIsAuthenticated(true);
+      setAdminPassword(passwordInput); // Store the entered password
       setShowPasswordPrompt(false);
       setPasswordInput("");
       toast({
@@ -231,6 +324,20 @@ export default function Jukebox() {
       setPasswordInput("");
     }
   };
+
+  // Show loading screen if redirecting to Spotify
+  if (isRedirecting && !spotifyToken) {
+    return (
+      <div className="min-h-screen bg-[#121212] flex items-center justify-center p-4">
+        <Card className="bg-[#121212]/80 backdrop-blur-xl border-white/5 p-8 rounded-2xl shadow-2xl text-center max-w-md">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#1DB954] mx-auto mb-4"></div>
+          <h2 className="text-2xl font-bold text-[#1DB954] mb-2">Connecting to Spotify...</h2>
+          <p className="text-zinc-400">Redirecting to Spotify to authenticate</p>
+          <p className="text-zinc-500 text-sm mt-2">Please wait...</p>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#121212] flex items-center justify-center p-4 overflow-hidden relative">
@@ -300,36 +407,51 @@ export default function Jukebox() {
         {/* Admin Controls Section */}
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider flex items-center gap-1">
-              {isAuthenticated ? <Unlock className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
-              Admin Controls
-            </p>
-            {/* If authenticated as admin but no token, show connect button */}
-            {!spotifyToken && isAuthenticated && (
+            <div className="flex items-center gap-2">
+              <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider flex items-center gap-1">
+                {isAuthenticated ? <Unlock className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
+                Admin Controls
+              </p>
+            </div>
+            {/* Show server auth status */}
+            {!spotifyToken && CLIENT_ID && (
                <Button 
                  size="sm" 
-                 onClick={handleLogin} 
-                 className="bg-[#1DB954] text-black hover:bg-[#1ed760] text-xs h-7 font-bold animate-pulse"
+                 onClick={handleServerLogin} 
+                 className="bg-[#1DB954] text-black hover:bg-[#1ed760] text-xs h-7 font-bold"
                >
-                 <LogIn className="w-3 h-3 mr-1" /> Authenticate Jukebox
+                 <LogIn className="w-3 h-3 mr-1" /> Setup Server (One-time)
                </Button>
             )}
              {/* If connected, show small status */}
             {spotifyToken && (
                <span className="text-[10px] text-spotify-green flex items-center gap-1">
                  <div className="w-1.5 h-1.5 rounded-full bg-spotify-green animate-pulse"></div>
-                 Live
+                 Connected
                </span>
             )}
           </div>
+          
+          {/* Show message if server not authenticated */}
+          {!spotifyToken && CLIENT_ID && (
+            <div className="bg-[#282828] border border-yellow-500/30 rounded-md p-3 text-xs text-yellow-400">
+              <p className="flex items-center gap-2">
+                <Lock className="w-3 h-3" />
+                Server needs one-time Spotify authentication. Click "Setup Server" above.
+              </p>
+            </div>
+          )}
 
           <div className="grid grid-cols-4 gap-3">
             <Button
               variant="secondary"
               className="h-14 bg-[#282828] hover:bg-[#3E3E3E] border-0 text-white"
-              onClick={() => executeAdminAction(() => {
-                if(isPlaying) spotifyApiCall("pause", "PUT");
-                else spotifyApiCall("play", "PUT");
+              onClick={() => executeAdminAction(async () => {
+                if(isPlaying) {
+                  await spotifyApiCall("pause");
+                } else {
+                  await spotifyApiCall("play");
+                }
               })}
             >
               {isPlaying ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6" />}
@@ -338,22 +460,35 @@ export default function Jukebox() {
             <Button
               variant="secondary"
               className="h-14 bg-[#282828] hover:bg-[#3E3E3E] border-0 text-white"
-              onClick={() => executeAdminAction(() => spotifyApiCall("next", "POST"))}
+              onClick={() => executeAdminAction(async () => {
+                await spotifyApiCall("next");
+              })}
             >
               <SkipForward className="w-6 h-6" />
             </Button>
 
-            <div className="col-span-2 bg-[#282828] rounded-md px-3 flex items-center gap-2">
+            <div 
+              className={`col-span-2 bg-[#282828] rounded-md px-3 flex items-center gap-2 ${!isAuthenticated ? 'opacity-60' : ''}`}
+            >
               <Volume1 className="w-4 h-4 text-zinc-400" />
               <Slider 
                 value={volume} 
                 onValueChange={(val) => {
-                   setVolume(val);
-                   executeAdminAction(() => spotifyApiCall(`volume?volume_percent=${val[0]}`, "PUT"));
+                  if (!isAuthenticated) {
+                    // Show password prompt if not authenticated
+                    setPendingAction(() => async () => {
+                      setVolume(val);
+                      await spotifyApiCall("volume", val[0]);
+                    });
+                    setShowPasswordPrompt(true);
+                    return;
+                  }
+                  setVolume(val);
+                  spotifyApiCall("volume", val[0]);
                 }}
                 max={100} 
                 step={1}
-                className="cursor-pointer" 
+                className={isAuthenticated ? "cursor-pointer" : "cursor-not-allowed"} 
               />
               <Volume2 className="w-4 h-4 text-zinc-400" />
             </div>
