@@ -63,17 +63,38 @@ app.use((req, res, next) => {
 
 // Initialize the app (for both server and serverless)
 export async function initializeApp() {
-  // Pass null for httpServer in serverless mode
-  await registerRoutes(httpServer, app);
-
-  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
-
-    // Don't throw after sending response - just log
-    res.status(status).json({ message });
-    console.error("Express error:", err);
+  console.log("[INIT] Starting app initialization...");
+  console.log("[INIT] Environment:", {
+    NODE_ENV: process.env.NODE_ENV,
+    VERCEL: !!process.env.VERCEL,
+    hasClientId: !!process.env.SPOTIFY_CLIENT_ID,
+    hasClientSecret: !!process.env.SPOTIFY_CLIENT_SECRET,
+    hasAdminPassword: !!process.env.ADMIN_PASSWORD
   });
+
+  try {
+    console.log("[INIT] Registering routes...");
+    await registerRoutes(httpServer, app);
+    console.log("[INIT] Routes registered successfully");
+
+    app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+      const status = err.status || err.statusCode || 500;
+      const message = err.message || "Internal Server Error";
+
+      console.error("[EXPRESS ERROR]", {
+        status,
+        message,
+        path: _req.path,
+        method: _req.method,
+        stack: err.stack
+      });
+
+      // Don't throw after sending response - just log
+      if (!res.headersSent) {
+        res.status(status).json({ message });
+      }
+    });
+    console.log("[INIT] Error handler registered");
 
   // Only setup static/vite for traditional server mode, not serverless
   if (!process.env.VERCEL) {

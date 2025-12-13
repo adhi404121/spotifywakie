@@ -93,23 +93,48 @@ export async function registerRoutes(
 ): Promise<Server | null> {
   // Server-side Spotify OAuth token exchange endpoint (one-time setup)
   app.post("/api/spotify/token", async (req, res) => {
+    const requestId = Math.random().toString(36).substring(7);
+    console.log(`[TOKEN-EXCHANGE-${requestId}] Token exchange request received`);
+    
     try {
+      console.log(`[TOKEN-EXCHANGE-${requestId}] Request body:`, {
+        hasCode: !!req.body?.code,
+        codeLength: req.body?.code?.length,
+        hasRedirectUri: !!req.body?.redirectUri,
+        redirectUri: req.body?.redirectUri
+      });
+
       const { code, redirectUri } = req.body;
 
       if (!code || !redirectUri) {
+        console.error(`[TOKEN-EXCHANGE-${requestId}] Missing required fields:`, {
+          hasCode: !!code,
+          hasRedirectUri: !!redirectUri
+        });
         return res.status(400).json({ error: "Missing code or redirectUri" });
       }
 
       if (!CLIENT_ID || !CLIENT_SECRET) {
+        console.error(`[TOKEN-EXCHANGE-${requestId}] Missing credentials:`, {
+          hasClientId: !!CLIENT_ID,
+          hasClientSecret: !!CLIENT_SECRET
+        });
         log("ERROR: SPOTIFY_CLIENT_ID or SPOTIFY_CLIENT_SECRET not configured", "spotify");
         return res.status(500).json({ error: "Server configuration error" });
       }
 
       // Normalize redirect URI - ensure it matches exactly what's in Spotify Console
       const normalizedRedirectUri = redirectUri.trim();
+      console.log(`[TOKEN-EXCHANGE-${requestId}] Using redirect URI:`, normalizedRedirectUri);
       log(`Server token exchange - using redirect URI: ${normalizedRedirectUri}`, "spotify");
 
+      console.log(`[TOKEN-EXCHANGE-${requestId}] Calling exchangeCodeForTokens...`);
       const tokens = await exchangeCodeForTokens(code, normalizedRedirectUri);
+      console.log(`[TOKEN-EXCHANGE-${requestId}] Token exchange successful:`, {
+        hasAccessToken: !!tokens.access_token,
+        hasRefreshToken: !!tokens.refresh_token,
+        expiresIn: tokens.expires_in
+      });
 
       // Store tokens server-side
       spotifyTokens.setTokens(
@@ -118,6 +143,7 @@ export async function registerRoutes(
         tokens.expires_in || 3600
       );
 
+      console.log(`[TOKEN-EXCHANGE-${requestId}] Tokens stored successfully`);
       log("Server Spotify tokens stored successfully", "spotify");
 
       res.json({
@@ -125,31 +151,65 @@ export async function registerRoutes(
         message: "Server authenticated with Spotify successfully",
         expires_in: tokens.expires_in,
       });
+      console.log(`[TOKEN-EXCHANGE-${requestId}] Response sent successfully`);
     } catch (error: any) {
+      console.error(`[TOKEN-EXCHANGE-${requestId}] Error:`, {
+        message: error.message,
+        stack: error.stack,
+        name: error.name
+      });
       log(`Token exchange error: ${error.message}`, "spotify");
       const errorMessage = error.message || "Token exchange failed";
       if (errorMessage.includes("redirect_uri")) {
+        console.error(`[TOKEN-EXCHANGE-${requestId}] Redirect URI mismatch detected`);
         log(`IMPORTANT: Redirect URI mismatch. Make sure '${req.body.redirectUri}' is exactly added in Spotify Developer Console`, "spotify");
       }
-      res.status(500).json({ error: errorMessage });
+      if (!res.headersSent) {
+        res.status(500).json({ error: errorMessage, requestId });
+      }
     }
   });
 
   // Check if server is authenticated
   app.get("/api/spotify/status", async (req, res) => {
+    const requestId = Math.random().toString(36).substring(7);
+    console.log(`[STATUS-${requestId}] Status check request received`);
+    
     try {
+      console.log(`[STATUS-${requestId}] Getting valid server token...`);
       const token = await getValidServerToken();
-      res.json({
-        authenticated: !!token,
-        hasToken: !!spotifyTokens.getAccessToken(),
+      const hasToken = !!spotifyTokens.getAccessToken();
+      const authenticated = !!token;
+      
+      console.log(`[STATUS-${requestId}] Status result:`, {
+        authenticated,
+        hasToken,
+        hasValidToken: !!token
       });
+      
+      const response = {
+        authenticated,
+        hasToken
+      };
+      
+      console.log(`[STATUS-${requestId}] Sending response:`, response);
+      res.json(response);
+      console.log(`[STATUS-${requestId}] Response sent successfully`);
     } catch (error: any) {
-      log(`Status endpoint error: ${error.message}`, "spotify");
-      res.status(500).json({ 
-        error: "Failed to check authentication status",
-        authenticated: false,
-        hasToken: false
+      console.error(`[STATUS-${requestId}] Error:`, {
+        message: error.message,
+        stack: error.stack,
+        name: error.name
       });
+      log(`Status endpoint error: ${error.message}`, "spotify");
+      if (!res.headersSent) {
+        res.status(500).json({ 
+          error: "Failed to check authentication status",
+          authenticated: false,
+          hasToken: false,
+          requestId
+        });
+      }
     }
   });
 

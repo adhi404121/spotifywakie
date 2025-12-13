@@ -77,25 +77,59 @@ export default function Jukebox() {
           }
 
           if (code && CLIENT_ID) {
+            console.log("[CLIENT] OAuth callback received with code:", {
+              codeLength: code.length,
+              codePrefix: code.substring(0, 10) + "...",
+              hasClientId: !!CLIENT_ID,
+              redirectUri: REDIRECT_URI
+            });
+            
             // One-time server authentication
             setIsRedirecting(true);
             try {
               const actualRedirectUri = REDIRECT_URI.trim();
               
+              console.log("[CLIENT] Preparing token exchange request:", {
+                redirectUri: actualRedirectUri,
+                codeLength: code.length
+              });
+              
               if (!actualRedirectUri) {
                 throw new Error("Redirect URI is not configured. Please set VITE_SPOTIFY_REDIRECT_URI in environment variables.");
               }
               
+              console.log("[CLIENT] Sending POST to /api/spotify/token...");
               const res = await fetch("/api/spotify/token", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ code, redirectUri: actualRedirectUri }),
               });
 
+              console.log("[CLIENT] Token exchange response:", {
+                ok: res.ok,
+                status: res.status,
+                statusText: res.statusText,
+                headers: Object.fromEntries(res.headers.entries())
+              });
+
               if (!res.ok) {
-                const errorData = await res.json().catch(() => ({}));
+                const errorData = await res.json().catch(async (e) => {
+                  const text = await res.text().catch(() => "Could not read response");
+                  console.error("[CLIENT] Failed to parse error response:", {
+                    error: e,
+                    responseText: text.substring(0, 200)
+                  });
+                  return { error: `HTTP ${res.status}: ${text.substring(0, 100)}` };
+                });
+                console.error("[CLIENT] Token exchange failed:", errorData);
                 throw new Error(errorData.error || "Token exchange failed");
               }
+
+              const responseData = await res.json().catch((e) => {
+                console.error("[CLIENT] Failed to parse success response:", e);
+                return {};
+              });
+              console.log("[CLIENT] Token exchange successful:", responseData);
 
               toast({
                 title: "Server Authenticated!",
@@ -108,7 +142,11 @@ export default function Jukebox() {
               setIsAuthenticated(true);
               fetchNowPlaying();
             } catch (error: any) {
-              console.error("Server auth error:", error);
+              console.error("[CLIENT] Server auth error:", {
+                message: error.message,
+                stack: error.stack,
+                name: error.name
+              });
               toast({
                 title: "Authentication Failed",
                 description: error.message || "Failed to authenticate server",
