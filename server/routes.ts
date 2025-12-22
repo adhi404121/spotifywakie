@@ -592,28 +592,62 @@ export async function registerRoutes(
         }
       }
 
-      // Ensure playlist is playing (if not already playing)
+      // Ensure playback is active - but prioritize immediate queue over playlist context
+      // CRITICAL: If immediate queue is active, don't set playlist context (it overrides queue)
       try {
         const playerRes = await spotifyApiCall(
           "https://api.spotify.com/v1/me/player",
           {},
           false
         );
+        
         if (playerRes.ok) {
           const playerData = await playerRes.json();
-          // If not playing from our playlist, start playing it
-          if (!playerData.context || playerData.context.uri !== `spotify:playlist:${playlistId}`) {
+          const isPlaying = playerData.is_playing;
+          
+          // If we successfully added to immediate queue, prioritize it
+          if (queueAdded) {
+            console.log(`[QUEUE-${requestId}] Immediate queue active - not setting playlist context`);
+            // Just ensure playback is active (don't change context - that would clear the queue)
+            if (!isPlaying) {
+              // Resume playback without changing context to preserve immediate queue
+              await spotifyApiCall("https://api.spotify.com/v1/me/player/play", { method: "PUT" }, false);
+              console.log(`[QUEUE-${requestId}] Resumed playback (preserving immediate queue)`);
+            } else {
+              console.log(`[QUEUE-${requestId}] Playback already active with immediate queue`);
+            }
+          } else {
+            // Immediate queue failed, fall back to playlist
+            console.log(`[QUEUE-${requestId}] Immediate queue failed, using playlist context`);
+            if (!playerData.context || playerData.context.uri !== `spotify:playlist:${playlistId}`) {
+              await spotifyApiCall(
+                `https://api.spotify.com/v1/me/player/play?context_uri=spotify:playlist:${playlistId}`,
+                { method: "PUT" },
+                false
+              );
+              log("Started playing radio playlist", "spotify");
+              console.log(`[QUEUE-${requestId}] Started playing from playlist`);
+            }
+          }
+        } else if (playerRes.status === 204) {
+          // No active player
+          if (queueAdded) {
+            // Start playback - the immediate queue will be used
+            console.log(`[QUEUE-${requestId}] Starting playback with immediate queue`);
+            await spotifyApiCall("https://api.spotify.com/v1/me/player/play", { method: "PUT" }, false);
+          } else {
+            // Start with playlist
+            console.log(`[QUEUE-${requestId}] No active player, starting playlist playback`);
             await spotifyApiCall(
               `https://api.spotify.com/v1/me/player/play?context_uri=spotify:playlist:${playlistId}`,
               { method: "PUT" },
               false
             );
-            log("Started playing radio playlist", "spotify");
           }
         }
       } catch (e) {
         // Ignore errors - playback might not be available
-        console.log("[QUEUE] Could not ensure playlist is playing:", e);
+        console.log(`[QUEUE-${requestId}] Could not ensure playback:`, e);
       }
 
       console.log(`[QUEUE-${requestId}] Successfully added to playlist`);
