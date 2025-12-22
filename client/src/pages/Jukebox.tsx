@@ -522,8 +522,8 @@ export default function Jukebox() {
         className: "text-spotify-green border-spotify-green" 
       });
       
-      // Refresh queue
-      fetchQueue();
+      // Refresh queue (don't preserve scroll on manual refresh)
+      fetchQueue(false);
       // Refresh now playing
       setTimeout(() => fetchNowPlaying(), 500);
     } catch (e) {
