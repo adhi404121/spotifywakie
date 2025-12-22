@@ -1050,6 +1050,27 @@ export async function registerRoutes(
         throw new Error(errorData.error?.message || errorData.error || "Failed to remove track");
       }
 
+      // If the track is current or next in the immediate queue, skip it
+      try {
+        const queueRes = await spotifyApiCall(
+          "https://api.spotify.com/v1/me/player/queue",
+          {},
+          false
+        );
+        if (queueRes.ok) {
+          const queueData = await queueRes.json();
+          const nowUri = queueData.currently_playing?.uri;
+          const nextUri = queueData.queue?.[0]?.uri;
+          if (nowUri === uriToRemove || nextUri === uriToRemove) {
+            await spotifyApiCall("https://api.spotify.com/v1/me/player/next", { method: "POST" }, false);
+            await new Promise((resolve) => setTimeout(resolve, 500));
+            log(`Skipped immediate queue track after playlist removal: ${uriToRemove}`, "spotify");
+          }
+        }
+      } catch {
+        // ignore skip attempt failures
+      }
+
       // Wait briefly for Spotify to update, then verify removal
       await new Promise(resolve => setTimeout(resolve, 800));
 
