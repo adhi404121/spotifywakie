@@ -981,7 +981,35 @@ export async function registerRoutes(
 
       const uriToRemove = await findTrackInPlaylist();
       if (!uriToRemove) {
-        console.error(`[QUEUE-DELETE-${requestId}] Track not found. URI: ${trackUri}, TrackId: ${trackId}`);
+        // Not in playlist; attempt to skip if it's current or next in immediate queue
+        try {
+          const queueRes = await spotifyApiCall(
+            "https://api.spotify.com/v1/me/player/queue",
+            {},
+            false
+          );
+          if (queueRes.ok) {
+            const queueData = await queueRes.json();
+            const nowUri = queueData.currently_playing?.uri;
+            const nextUri = queueData.queue?.[0]?.uri;
+            const targetUri =
+              trackUri ||
+              (trackId ? `spotify:track:${trackId.replace("spotify:track:", "")}` : null);
+
+            if (targetUri && (nowUri === targetUri || nextUri === targetUri)) {
+              await spotifyApiCall("https://api.spotify.com/v1/me/player/next", { method: "POST" }, false);
+              await new Promise((resolve) => setTimeout(resolve, 500));
+              log(`Skipped immediate queue track: ${targetUri}`, "spotify");
+              return res.json({
+                success: true,
+                message: "Skipped track from immediate queue",
+              });
+            }
+          }
+        } catch {
+          // ignore and fall through
+        }
+
         return res.status(404).json({
           error: "Track not found in playlist",
           details: "Track may be in immediate queue only or already removed",
