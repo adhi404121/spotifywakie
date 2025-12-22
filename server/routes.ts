@@ -1027,8 +1027,36 @@ export async function registerRoutes(
 
       const verifyFound = await findTrackInPlaylist();
       if (verifyFound) {
-        console.error(`[QUEUE-DELETE-${requestId}] Track still exists after removal attempt`);
-        throw new Error("Track removal may have failed - track still in playlist");
+        console.error(`[QUEUE-DELETE-${requestId}] Track still exists after removal attempt; attempting skip if next/current`);
+        // Attempt to skip if it is current or next (cannot remove immediate queue directly)
+        try {
+          // Check currently playing / queue
+          const queueRes = await spotifyApiCall(
+            "https://api.spotify.com/v1/me/player/queue",
+            {},
+            false
+          );
+          if (queueRes.ok) {
+            const queueData = await queueRes.json();
+            const nowPlayingUri = queueData.currently_playing?.uri;
+            const nextUri = queueData.queue?.[0]?.uri;
+            if (nowPlayingUri === trackUri || nextUri === trackUri) {
+              await spotifyApiCall("https://api.spotify.com/v1/me/player/next", { method: "POST" }, false);
+              // Allow state to settle
+              await new Promise(resolve => setTimeout(resolve, 500));
+              const verifyAfterSkip = await findTrackInPlaylist();
+              if (verifyAfterSkip) {
+                throw new Error("Track removal may have failed - track still in playlist after skip");
+              }
+            } else {
+              throw new Error("Track still in playlist after removal attempt");
+            }
+          } else {
+            throw new Error("Track still in playlist after removal attempt");
+          }
+        } catch (skipErr: any) {
+          throw new Error(skipErr?.message || "Track still in playlist after removal attempt");
+        }
       }
 
       log(`Track removed from playlist: ${uriToRemove}`, "spotify");
