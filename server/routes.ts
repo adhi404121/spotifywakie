@@ -839,7 +839,6 @@ export async function registerRoutes(
             duration_ms: track.duration_ms,
             is_immediate: true, // Mark as immediate queue item
           }));
-          console.log(`[QUEUE-GET-${requestId}] Immediate queue items:`, immediateQueue.length);
         }
       } catch (e) {
         console.log(`[QUEUE-GET-${requestId}] Could not get immediate queue:`, e);
@@ -908,7 +907,6 @@ export async function registerRoutes(
       const { uri, trackId } = req.body;
       const { password } = req.headers;
 
-      console.log(`[QUEUE-DELETE-${requestId}] Remove request:`, { uri, trackId, hasPassword: !!password });
 
       if (!uri && !trackId) {
         return res.status(400).json({ error: "Missing uri or trackId parameter" });
