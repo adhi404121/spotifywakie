@@ -966,18 +966,30 @@ export async function registerRoutes(
       );
       
       // If not found, try matching by track ID (in case URI format differs)
-      if (!trackInPlaylist && trackId) {
-        const trackIdOnly = trackId.replace("spotify:track:", "");
-        trackInPlaylist = (playlistTracksData.items || []).find(
-          (item: any) => item.track && item.track.id === trackIdOnly
-        );
-        if (trackInPlaylist) {
-          // Update trackUri to match what's actually in playlist
-          trackUri = trackInPlaylist.track.uri;
+      if (!trackInPlaylist) {
+        // Extract track ID from URI if needed
+        let searchTrackId = trackId;
+        if (!searchTrackId && trackUri) {
+          const match = trackUri.match(/spotify:track:([a-zA-Z0-9]+)/);
+          if (match) {
+            searchTrackId = match[1];
+          }
+        }
+        
+        if (searchTrackId) {
+          const trackIdOnly = searchTrackId.replace("spotify:track:", "");
+          trackInPlaylist = (playlistTracksData.items || []).find(
+            (item: any) => item.track && item.track.id === trackIdOnly
+          );
+          if (trackInPlaylist) {
+            // Update trackUri to match what's actually in playlist
+            trackUri = trackInPlaylist.track.uri;
+          }
         }
       }
 
       if (!trackInPlaylist) {
+        console.error(`[QUEUE-DELETE-${requestId}] Track not found. URI: ${trackUri}, TrackId: ${trackId}`);
         return res.status(404).json({ 
           error: "Track not found in playlist",
           details: "Track may be in immediate queue only or already removed"
