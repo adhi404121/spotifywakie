@@ -220,9 +220,9 @@ export default function Jukebox() {
     const interval = setInterval(() => {
       if (spotifyToken) {
         fetchNowPlaying();
-        // Also refresh queue if it's open
-        if (showQueue) {
-          fetchQueue();
+        // Also refresh queue if it's open (preserve scroll position, no loading spinner)
+        if (showQueue && !isScrollingRef.current) {
+          fetchQueue(true, false);
         }
       }
     }, 2000);
