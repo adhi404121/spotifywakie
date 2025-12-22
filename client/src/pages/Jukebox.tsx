@@ -442,8 +442,16 @@ export default function Jukebox() {
     handleQueueSongWithUri();
   };
 
-  const fetchQueue = async () => {
+  const fetchQueue = async (preserveScroll = false) => {
     if (!spotifyToken) return; // Don't fetch if not authenticated
+    
+    // Don't refresh if user is scrolling
+    if (isScrollingRef.current) {
+      return;
+    }
+    
+    // Save scroll position if preserving
+    const scrollTop = preserveScroll && queueScrollRef.current ? queueScrollRef.current.scrollTop : null;
     
     setIsLoadingQueue(true);
     try {
@@ -452,6 +460,15 @@ export default function Jukebox() {
         const data = await res.json();
         setQueue(data.queue || []);
         setCurrentlyPlaying(data.currently_playing || null);
+        
+        // Restore scroll position after state update
+        if (preserveScroll && scrollTop !== null && queueScrollRef.current) {
+          setTimeout(() => {
+            if (queueScrollRef.current) {
+              queueScrollRef.current.scrollTop = scrollTop;
+            }
+          }, 0);
+        }
       }
     } catch (e) {
       console.error("Error fetching queue:", e);
