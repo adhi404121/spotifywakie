@@ -899,15 +899,7 @@ export async function registerRoutes(
         }
       } catch (e) {
         // Ignore - might not be playing
-        console.log(`[QUEUE-GET-${requestId}] Could not get currently playing:`, e);
       }
-
-      console.log(`[QUEUE-GET-${requestId}] Returning queue:`, {
-        immediateQueueLength: immediateQueue.length,
-        playlistTracksLength: filteredPlaylistTracks.length,
-        totalTracks: allTracks.length,
-        hasCurrentlyPlaying: !!currentlyPlaying
-      });
 
       res.json({ queue: allTracks, currently_playing: currentlyPlaying });
     } catch (error: any) {
@@ -961,11 +953,8 @@ export async function registerRoutes(
         }
       }
 
-      console.log(`[QUEUE-DELETE-${requestId}] Normalized URI:`, trackUri);
-
       // Get playlist ID
       const playlistId = await getOrCreateRadioPlaylist();
-      console.log(`[QUEUE-DELETE-${requestId}] Using playlist:`, playlistId);
       
       // First, check if track exists in playlist
       const playlistTracksRes = await spotifyApiCall(
@@ -979,22 +968,30 @@ export async function registerRoutes(
       }
 
       const playlistTracksData = await playlistTracksRes.json();
-      const trackInPlaylist = (playlistTracksData.items || []).find(
+      
+      // Try to find track by URI (exact match)
+      let trackInPlaylist = (playlistTracksData.items || []).find(
         (item: any) => item.track && item.track.uri === trackUri
       );
-
-      if (!trackInPlaylist) {
-        console.log(`[QUEUE-DELETE-${requestId}] Track not found in playlist:`, trackUri);
-        // Track might be in immediate queue only - can't remove from there via API
-        // But we'll still return success since it's not in the persistent playlist
-        return res.json({ 
-          success: true, 
-          message: "Track not in playlist (may be in immediate queue only)",
-          warning: "Track may still be in immediate queue. It will be removed when played."
-        });
+      
+      // If not found, try matching by track ID (in case URI format differs)
+      if (!trackInPlaylist && trackId) {
+        const trackIdOnly = trackId.replace("spotify:track:", "");
+        trackInPlaylist = (playlistTracksData.items || []).find(
+          (item: any) => item.track && item.track.id === trackIdOnly
+        );
+        if (trackInPlaylist) {
+          // Update trackUri to match what's actually in playlist
+          trackUri = trackInPlaylist.track.uri;
+        }
       }
 
-      console.log(`[QUEUE-DELETE-${requestId}] Track found in playlist, removing...`);
+      if (!trackInPlaylist) {
+        return res.status(404).json({ 
+          error: "Track not found in playlist",
+          details: "Track may be in immediate queue only or already removed"
+        });
+      }
 
       // Get current playlist snapshot_id for removal
       const playlistInfoRes = await spotifyApiCall(
@@ -1009,8 +1006,6 @@ export async function registerRoutes(
       
       const playlistInfo = await playlistInfoRes.json();
       const snapshotId = playlistInfo.snapshot_id;
-
-      console.log(`[QUEUE-DELETE-${requestId}] Removing with snapshot:`, snapshotId);
 
       // Remove track from playlist
       const removeRes = await spotifyApiCall(
@@ -1046,7 +1041,6 @@ export async function registerRoutes(
         throw new Error(errorData.error?.message || errorData.error || "Failed to remove track");
       }
 
-      console.log(`[QUEUE-DELETE-${requestId}] ✅ Successfully removed from playlist`);
       log(`Track removed from playlist: ${trackUri}`, "spotify");
       res.json({ success: true, message: "Track removed from queue" });
     } catch (error: any) {
