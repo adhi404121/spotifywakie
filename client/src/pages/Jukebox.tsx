@@ -889,7 +889,7 @@ export default function Jukebox() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => handleRemoveFromQueue(track.uri)}
+                            onClick={() => handleRemoveFromQueue(track.uri, track.id)}
                             className="h-6 w-6 p-0 text-red-400 hover:text-red-300 hover:bg-red-500/20"
                           >
                             <X className="w-3 h-3" />
