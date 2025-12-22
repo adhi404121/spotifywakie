@@ -228,15 +228,25 @@ export async function registerRoutes(
 
   // Add song to queue (no authentication required for users)
   app.post("/api/spotify/queue", async (req, res) => {
+    const requestId = Math.random().toString(36).substring(7);
+    console.log(`[QUEUE-${requestId}] Queue request received:`, {
+      hasSongName: !!req.body?.songName,
+      songName: req.body?.songName,
+      hasUri: !!req.body?.uri,
+      uri: req.body?.uri
+    });
+
     try {
       const { songName, uri } = req.body;
 
       if (!songName && !uri) {
+        console.error(`[QUEUE-${requestId}] Missing songName or uri`);
         return res.status(400).json({ error: "Missing songName or uri" });
       }
 
       const accessToken = await getValidServerToken();
       if (!accessToken) {
+        console.error(`[QUEUE-${requestId}] No valid access token`);
         return res.status(401).json({ 
           error: "Server not authenticated with Spotify. Please authenticate the server first." 
         });
@@ -246,44 +256,101 @@ export async function registerRoutes(
 
       // If song name provided, search for it
       if (songName && !uri) {
-        const searchRes = await fetch(
-          `https://api.spotify.com/v1/search?q=${encodeURIComponent(songName)}&type=track&limit=1`,
-          {
-            headers: { Authorization: `Bearer ${accessToken}` },
-          }
-        );
+        const searchUrl = `https://api.spotify.com/v1/search?q=${encodeURIComponent(songName)}&type=track&limit=1`;
+        console.log(`[QUEUE-${requestId}] Searching for song:`, { songName, searchUrl });
+        
+        const searchRes = await fetch(searchUrl, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+
+        console.log(`[QUEUE-${requestId}] Search response:`, {
+          status: searchRes.status,
+          statusText: searchRes.statusText,
+          ok: searchRes.ok
+        });
 
         if (!searchRes.ok) {
-          const error = await searchRes.json().catch(() => ({}));
-          throw new Error(error.error?.message || "Search failed");
+          const errorText = await searchRes.text().catch(() => "Could not read error response");
+          let errorData;
+          try {
+            errorData = JSON.parse(errorText);
+          } catch {
+            errorData = { raw: errorText };
+          }
+          
+          console.error(`[QUEUE-${requestId}] Search failed:`, {
+            status: searchRes.status,
+            statusText: searchRes.statusText,
+            error: errorData
+          });
+          
+          const errorMessage = errorData.error?.message || errorData.error || errorText || "Search failed";
+          log(`Queue search error: ${searchRes.status} ${searchRes.statusText} - ${errorMessage}`, "spotify");
+          throw new Error(`Search failed: ${errorMessage}`);
         }
 
         const searchData = await searchRes.json();
+        console.log(`[QUEUE-${requestId}] Search results:`, {
+          totalResults: searchData.tracks?.total || 0,
+          itemsFound: searchData.tracks?.items?.length || 0
+        });
+
         if (!searchData.tracks?.items?.length) {
+          console.log(`[QUEUE-${requestId}] No tracks found for: ${songName}`);
           return res.status(404).json({ error: `Song not found: ${songName}` });
         }
 
         trackUri = searchData.tracks.items[0].uri;
+        console.log(`[QUEUE-${requestId}] Found track URI:`, trackUri);
       }
 
       // Add to queue
-      const queueRes = await fetch(
-        `https://api.spotify.com/v1/me/player/queue?uri=${encodeURIComponent(trackUri)}`,
-        {
-          method: "POST",
-          headers: { Authorization: `Bearer ${accessToken}` },
-        }
-      );
+      const queueUrl = `https://api.spotify.com/v1/me/player/queue?uri=${encodeURIComponent(trackUri)}`;
+      console.log(`[QUEUE-${requestId}] Adding to queue:`, { trackUri, queueUrl });
+      
+      const queueRes = await fetch(queueUrl, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+
+      console.log(`[QUEUE-${requestId}] Queue response:`, {
+        status: queueRes.status,
+        statusText: queueRes.statusText,
+        ok: queueRes.ok
+      });
 
       if (!queueRes.ok && queueRes.status !== 204) {
-        const error = await queueRes.json().catch(() => ({}));
-        throw new Error(error.error?.message || "Failed to add song to queue");
+        const errorText = await queueRes.text().catch(() => "Could not read error response");
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch {
+          errorData = { raw: errorText };
+        }
+        
+        console.error(`[QUEUE-${requestId}] Queue add failed:`, {
+          status: queueRes.status,
+          statusText: queueRes.statusText,
+          error: errorData
+        });
+        
+        const errorMessage = errorData.error?.message || errorData.error || errorText || "Failed to add song to queue";
+        log(`Queue add error: ${queueRes.status} ${queueRes.statusText} - ${errorMessage}`, "spotify");
+        throw new Error(`Failed to add song to queue: ${errorMessage}`);
       }
 
+      console.log(`[QUEUE-${requestId}] Successfully added to queue`);
       res.json({ success: true, message: "Song added to queue" });
     } catch (error: any) {
+      console.error(`[QUEUE-${requestId}] Queue endpoint error:`, {
+        message: error.message,
+        stack: error.stack,
+        name: error.name
+      });
       log(`Queue error: ${error.message}`, "spotify");
-      res.status(500).json({ error: error.message || "Failed to add song" });
+      if (!res.headersSent) {
+        res.status(500).json({ error: error.message || "Failed to add song" });
+      }
     }
   });
 
