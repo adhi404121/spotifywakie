@@ -602,9 +602,19 @@ export async function registerRoutes(
       let response;
       switch (action) {
         case "play":
-          response = await spotifyApiCall("https://api.spotify.com/v1/me/player/play", {
-            method: "PUT",
-          });
+          // Ensure playlist is playing
+          try {
+            const playlistId = await getOrCreateRadioPlaylist();
+            response = await spotifyApiCall(
+              `https://api.spotify.com/v1/me/player/play?context_uri=spotify:playlist:${playlistId}`,
+              { method: "PUT" }
+            );
+          } catch (e) {
+            // Fallback to regular play
+            response = await spotifyApiCall("https://api.spotify.com/v1/me/player/play", {
+              method: "PUT",
+            });
+          }
           break;
         case "pause":
           response = await spotifyApiCall("https://api.spotify.com/v1/me/player/pause", {

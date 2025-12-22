@@ -24,7 +24,10 @@ const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || "";
 const SCOPES = [
   "user-modify-playback-state",
   "user-read-playback-state",
-  "user-read-currently-playing"
+  "user-read-currently-playing",
+  "playlist-modify-public",
+  "playlist-modify-private",
+  "playlist-read-private"
 ];
 
 // Server-side authentication - no client-side token storage needed
