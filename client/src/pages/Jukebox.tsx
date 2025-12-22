@@ -273,9 +273,9 @@ export default function Jukebox() {
         // Only update if track actually changed (avoid unnecessary re-renders)
         if (currentTrack.name !== newTrack.name || currentTrack.artist !== newTrack.artist) {
           setCurrentTrack(newTrack);
-          // If queue is open, refresh it when track changes (preserve scroll)
+          // If queue is open, refresh it when track changes (preserve scroll, no loading)
           if (showQueue) {
-            fetchQueue(true);
+            fetchQueue(true, false);
           }
         }
         setIsPlaying(data.playing);
@@ -442,7 +442,7 @@ export default function Jukebox() {
     handleQueueSongWithUri();
   };
 
-  const fetchQueue = async (preserveScroll = false) => {
+  const fetchQueue = async (preserveScroll = false, showLoading = false) => {
     if (!spotifyToken) return; // Don't fetch if not authenticated
     
     // Don't refresh if user is scrolling
@@ -453,7 +453,11 @@ export default function Jukebox() {
     // Save scroll position if preserving
     const scrollTop = preserveScroll && queueScrollRef.current ? queueScrollRef.current.scrollTop : null;
     
-    setIsLoadingQueue(true);
+    // Only show loading spinner on initial load or manual refresh
+    if (showLoading) {
+      setIsLoadingQueue(true);
+    }
+    
     try {
       const res = await fetch("/api/spotify/queue");
       if (res.ok) {
@@ -474,13 +478,16 @@ export default function Jukebox() {
       console.error("Error fetching queue:", e);
       // Don't show toast on every poll, only on manual refresh
     } finally {
-      setIsLoadingQueue(false);
+      if (showLoading) {
+        setIsLoadingQueue(false);
+      }
     }
   };
 
   const handleToggleQueue = () => {
     if (!showQueue) {
-      fetchQueue();
+      // Show loading on initial open
+      fetchQueue(false, true);
     }
     setShowQueue(!showQueue);
   };
@@ -522,8 +529,8 @@ export default function Jukebox() {
         className: "text-spotify-green border-spotify-green" 
       });
       
-      // Refresh queue (don't preserve scroll on manual refresh)
-      fetchQueue(false);
+      // Refresh queue (don't preserve scroll on manual refresh, show loading)
+      fetchQueue(false, true);
       // Refresh now playing
       setTimeout(() => fetchNowPlaying(), 500);
     } catch (e) {
