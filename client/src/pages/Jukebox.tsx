@@ -213,15 +213,19 @@ export default function Jukebox() {
 
     checkServerAuth();
     
-    // Poll for now playing every 5 seconds
+    // Poll for now playing every 2 seconds (more frequent updates)
     const interval = setInterval(() => {
       if (spotifyToken) {
         fetchNowPlaying();
+        // Also refresh queue if it's open
+        if (showQueue) {
+          fetchQueue();
+        }
       }
-    }, 5000);
+    }, 2000);
     
     return () => clearInterval(interval);
-  }, []);
+  }, [spotifyToken, showQueue]);
 
   const handleServerLogin = () => {
     // One-time server authentication setup
@@ -422,6 +426,8 @@ export default function Jukebox() {
   };
 
   const fetchQueue = async () => {
+    if (!spotifyToken) return; // Don't fetch if not authenticated
+    
     setIsLoadingQueue(true);
     try {
       const res = await fetch("/api/spotify/queue");
@@ -432,7 +438,7 @@ export default function Jukebox() {
       }
     } catch (e) {
       console.error("Error fetching queue:", e);
-      toast({ title: "Error", description: "Failed to load queue", variant: "destructive" });
+      // Don't show toast on every poll, only on manual refresh
     } finally {
       setIsLoadingQueue(false);
     }
