@@ -433,8 +433,13 @@ export default function Jukebox() {
       setShowSuggestions(false);
       setSearchSuggestions([]);
       
-      // Refresh now playing
-      setTimeout(() => fetchNowPlaying(), 500);
+      // Refresh queue and now playing after a short delay (to allow Spotify API to update)
+      setTimeout(() => {
+        if (showQueue) {
+          fetchQueue(false, false); // Refresh queue if it's open
+        }
+        fetchNowPlaying();
+      }, 800);
     } catch (e) {
       console.error("Queue error:", e);
       toast({ title: "Network Error", description: "Failed to add song", variant: "destructive" });

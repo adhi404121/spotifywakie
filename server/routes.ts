@@ -716,42 +716,81 @@ export async function registerRoutes(
     }
   });
 
-  // Get current queue (anyone can view)
+  // Get current queue (playlist-based, anyone can view)
   app.get("/api/spotify/queue", async (req, res) => {
     const requestId = Math.random().toString(36).substring(7);
     try {
-      const queueRes = await spotifyApiCall(
-        "https://api.spotify.com/v1/me/player/queue",
+      // Get or create playlist
+      const playlistId = await getOrCreateRadioPlaylist();
+      console.log(`[QUEUE-GET-${requestId}] Fetching playlist:`, playlistId);
+      
+      // Get playlist tracks
+      const playlistRes = await spotifyApiCall(
+        `https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=100`,
         {},
         false
       );
 
-      if (queueRes.status === 204 || !queueRes.ok) {
+      if (!playlistRes.ok) {
+        console.error(`[QUEUE-GET-${requestId}] Playlist fetch failed:`, {
+          status: playlistRes.status,
+          statusText: playlistRes.statusText
+        });
         return res.json({ queue: [], currently_playing: null });
       }
 
-      const queueData = await queueRes.json();
-      const queue = (queueData.queue || []).map((track: any) => ({
-        id: track.id,
-        name: track.name,
-        artist: track.artists.map((a: any) => a.name).join(", "),
-        album: track.album.name,
-        image: track.album.images[0]?.url,
-        uri: track.uri,
-        duration_ms: track.duration_ms,
-      }));
+      const playlistData = await playlistRes.json();
+      console.log(`[QUEUE-GET-${requestId}] Playlist tracks:`, {
+        total: playlistData.total || 0,
+        items: playlistData.items?.length || 0
+      });
 
-      const currentlyPlaying = queueData.currently_playing ? {
-        id: queueData.currently_playing.id,
-        name: queueData.currently_playing.name,
-        artist: queueData.currently_playing.artists.map((a: any) => a.name).join(", "),
-        album: queueData.currently_playing.album.name,
-        image: queueData.currently_playing.album.images[0]?.url,
-        uri: queueData.currently_playing.uri,
-        duration_ms: queueData.currently_playing.duration_ms,
-      } : null;
+      const tracks = (playlistData.items || [])
+        .filter((item: any) => item.track && !item.is_local) // Filter out null tracks and local files
+        .map((item: any) => ({
+          id: item.track.id,
+          name: item.track.name,
+          artist: item.track.artists.map((a: any) => a.name).join(", "),
+          album: item.track.album.name,
+          image: item.track.album.images[0]?.url,
+          uri: item.track.uri,
+          duration_ms: item.track.duration_ms,
+          snapshot_id: item.track.id, // For removal
+        }));
 
-      res.json({ queue, currently_playing: currentlyPlaying });
+      // Get currently playing track
+      let currentlyPlaying = null;
+      try {
+        const nowPlayingRes = await spotifyApiCall(
+          "https://api.spotify.com/v1/me/player/currently-playing",
+          {},
+          false
+        );
+        if (nowPlayingRes.ok && nowPlayingRes.status !== 204) {
+          const nowPlayingData = await nowPlayingRes.json();
+          if (nowPlayingData.item) {
+            currentlyPlaying = {
+              id: nowPlayingData.item.id,
+              name: nowPlayingData.item.name,
+              artist: nowPlayingData.item.artists.map((a: any) => a.name).join(", "),
+              album: nowPlayingData.item.album.name,
+              image: nowPlayingData.item.album.images[0]?.url,
+              uri: nowPlayingData.item.uri,
+              duration_ms: nowPlayingData.item.duration_ms,
+            };
+          }
+        }
+      } catch (e) {
+        // Ignore - might not be playing
+        console.log(`[QUEUE-GET-${requestId}] Could not get currently playing:`, e);
+      }
+
+      console.log(`[QUEUE-GET-${requestId}] Returning queue:`, {
+        queueLength: tracks.length,
+        hasCurrentlyPlaying: !!currentlyPlaying
+      });
+
+      res.json({ queue: tracks, currently_playing: currentlyPlaying });
     } catch (error: any) {
       console.error(`[QUEUE-GET-${requestId}] Error:`, error.message);
       if (!res.headersSent) {
