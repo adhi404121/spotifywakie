@@ -537,10 +537,11 @@ export default function Jukebox() {
         className: "text-spotify-green border-spotify-green" 
       });
       
-      // Refresh queue (don't preserve scroll on manual refresh, show loading)
-      fetchQueue(false, true);
-      // Refresh now playing
-      setTimeout(() => fetchNowPlaying(), 500);
+      // Wait a bit longer for Spotify API to update, then refresh
+      setTimeout(() => {
+        fetchQueue(false, true);
+        fetchNowPlaying();
+      }, 1000);
     } catch (e) {
       console.error("Remove queue error:", e);
       toast({ title: "Network Error", description: "Failed to remove from queue", variant: "destructive" });
