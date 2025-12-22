@@ -503,7 +503,28 @@ export async function registerRoutes(
       const playlistId = await getOrCreateRadioPlaylist();
       console.log(`[QUEUE-${requestId}] Using playlist:`, playlistId);
 
-      // Add track to playlist
+      // Strategy: Add to immediate queue for priority, then add to playlist for persistence
+      // This ensures newly queued songs play before existing playlist songs
+      
+      // Step 1: Add to immediate player queue (highest priority - plays next)
+      let queueAdded = false;
+      try {
+        const queueUrl = `https://api.spotify.com/v1/me/player/queue?uri=${encodeURIComponent(trackUri)}`;
+        console.log(`[QUEUE-${requestId}] Adding to immediate queue:`, { trackUri, queueUrl });
+        
+        const queueRes = await spotifyApiCall(queueUrl, { method: "POST" }, false);
+        
+        if (queueRes.ok || queueRes.status === 204) {
+          queueAdded = true;
+          console.log(`[QUEUE-${requestId}] Successfully added to immediate queue`);
+        } else {
+          console.log(`[QUEUE-${requestId}] Queue add returned status:`, queueRes.status);
+        }
+      } catch (e) {
+        console.log(`[QUEUE-${requestId}] Could not add to immediate queue (will use playlist only):`, e);
+      }
+
+      // Step 2: Also add to playlist at position 0 for persistence and queue view
       const addUrl = `https://api.spotify.com/v1/playlists/${playlistId}/tracks`;
       console.log(`[QUEUE-${requestId}] Adding to playlist:`, { trackUri, addUrl });
       
@@ -514,7 +535,7 @@ export async function registerRoutes(
         },
         body: JSON.stringify({
           uris: [trackUri],
-          position: 0, // Add to beginning of playlist
+          position: 0, // Add to beginning of playlist (most recent first)
         }),
       });
 
@@ -539,9 +560,14 @@ export async function registerRoutes(
           error: errorData
         });
         
-        const errorMessage = errorData.error?.message || errorData.error || errorText || "Failed to add song to playlist";
-        log(`Playlist add error: ${addRes.status} ${addRes.statusText} - ${errorMessage}`, "spotify");
-        throw new Error(`Failed to add song: ${errorMessage}`);
+        // If queue add succeeded but playlist add failed, still return success
+        if (queueAdded) {
+          console.log(`[QUEUE-${requestId}] Queue add succeeded, but playlist add failed - continuing`);
+        } else {
+          const errorMessage = errorData.error?.message || errorData.error || errorText || "Failed to add song to playlist";
+          log(`Playlist add error: ${addRes.status} ${addRes.statusText} - ${errorMessage}`, "spotify");
+          throw new Error(`Failed to add song: ${errorMessage}`);
+        }
       }
 
       // Ensure playlist is playing (if not already playing)
