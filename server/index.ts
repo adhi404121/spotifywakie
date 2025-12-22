@@ -50,8 +50,15 @@ app.use((req, res, next) => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+      // Don't log queue responses (too large and noisy)
+      if (capturedJsonResponse && !path.includes("/api/spotify/queue")) {
+        // Limit response size for logging
+        const responseStr = JSON.stringify(capturedJsonResponse);
+        if (responseStr.length < 200) {
+          logLine += ` :: ${responseStr}`;
+        } else {
+          logLine += ` :: ${responseStr.substring(0, 200)}...`;
+        }
       }
 
       log(logLine);
@@ -74,12 +81,12 @@ export async function initializeApp() {
 
   try {
     console.log("[INIT] Registering routes...");
-    await registerRoutes(httpServer, app);
+  await registerRoutes(httpServer, app);
     console.log("[INIT] Routes registered successfully");
 
-    app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-      const status = err.status || err.statusCode || 500;
-      const message = err.message || "Internal Server Error";
+  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+    const status = err.status || err.statusCode || 500;
+    const message = err.message || "Internal Server Error";
 
       console.error("[EXPRESS ERROR]", {
         status,
@@ -91,23 +98,23 @@ export async function initializeApp() {
 
       // Don't throw after sending response - just log
       if (!res.headersSent) {
-        res.status(status).json({ message });
+    res.status(status).json({ message });
       }
-    });
+  });
     console.log("[INIT] Error handler registered");
 
     // Only setup static/vite for traditional server mode, not serverless
     if (!process.env.VERCEL) {
-      // importantly only setup vite in development and after
-      // setting up all the other routes so the catch-all route
-      // doesn't interfere with the other routes
-      if (process.env.NODE_ENV === "production") {
-        serveStatic(app);
-      } else {
-        const { setupVite } = await import("./vite");
+  // importantly only setup vite in development and after
+  // setting up all the other routes so the catch-all route
+  // doesn't interfere with the other routes
+  if (process.env.NODE_ENV === "production") {
+    serveStatic(app);
+  } else {
+    const { setupVite } = await import("./vite");
         if (httpServer) {
-          await setupVite(httpServer, app);
-        }
+    await setupVite(httpServer, app);
+  }
       }
     }
   } catch (error: any) {
@@ -124,9 +131,9 @@ if (!process.env.VERCEL) {
   (async () => {
     await initializeApp();
 
-    // ALWAYS serve the app on the port specified in the environment variable PORT
+  // ALWAYS serve the app on the port specified in the environment variable PORT
     // Default to 8089 for local development
-    // this serves both the API and the client.
+  // this serves both the API and the client.
     const port = parseInt(process.env.PORT || "8089", 10);
     const isWindows = process.platform === "win32";
     
@@ -138,7 +145,7 @@ if (!process.env.VERCEL) {
     
     if (httpServer) {
       httpServer.listen(listenOptions, () => {
-        log(`serving on port ${port}`);
+      log(`serving on port ${port}`);
       }).on("error", (err: NodeJS.ErrnoException) => {
         if (err.code === "EACCES" || err.code === "EADDRINUSE") {
           log(`Port ${port} is not available. Try a different port by setting PORT environment variable.`, "error");
@@ -147,7 +154,7 @@ if (!process.env.VERCEL) {
         throw err;
       });
     }
-  })();
+})();
 }
 
 // Export app for Vercel serverless functions

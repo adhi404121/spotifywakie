@@ -804,7 +804,6 @@ export async function registerRoutes(
     try {
       // Get or create playlist
       const playlistId = await getOrCreateRadioPlaylist();
-      console.log(`[QUEUE-GET-${requestId}] Fetching playlist:`, playlistId);
       
       // Get playlist tracks
       const playlistRes = await spotifyApiCall(
@@ -814,18 +813,10 @@ export async function registerRoutes(
       );
 
       if (!playlistRes.ok) {
-        console.error(`[QUEUE-GET-${requestId}] Playlist fetch failed:`, {
-          status: playlistRes.status,
-          statusText: playlistRes.statusText
-        });
         return res.json({ queue: [], currently_playing: null });
       }
 
       const playlistData = await playlistRes.json();
-      console.log(`[QUEUE-GET-${requestId}] Playlist tracks:`, {
-        total: playlistData.total || 0,
-        items: playlistData.items?.length || 0
-      });
 
       // Get immediate player queue first (these have highest priority)
       let immediateQueue: any[] = [];
