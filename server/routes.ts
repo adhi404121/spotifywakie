@@ -40,8 +40,25 @@ async function getValidServerToken(): Promise<string | null> {
 
 // Helper function to exchange authorization code for tokens
 async function exchangeCodeForTokens(code: string, redirectUri: string) {
+  // Validate credentials before making request
+  if (!CLIENT_ID || !CLIENT_SECRET) {
+    const missing = [];
+    if (!CLIENT_ID) missing.push("CLIENT_ID");
+    if (!CLIENT_SECRET) missing.push("CLIENT_SECRET");
+    throw new Error(`Missing credentials: ${missing.join(", ")}`);
+  }
+
   const authString = Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString("base64");
   
+  console.log("[TOKEN-EXCHANGE] Making token request to Spotify:", {
+    hasClientId: !!CLIENT_ID,
+    clientIdLength: CLIENT_ID.length,
+    hasClientSecret: !!CLIENT_SECRET,
+    clientSecretLength: CLIENT_SECRET.length,
+    redirectUri,
+    codeLength: code.length
+  });
+
   const response = await fetch("https://accounts.spotify.com/api/token", {
     method: "POST",
     headers: {
@@ -55,9 +72,29 @@ async function exchangeCodeForTokens(code: string, redirectUri: string) {
     }),
   });
 
+  console.log("[TOKEN-EXCHANGE] Spotify response:", {
+    status: response.status,
+    statusText: response.statusText,
+    ok: response.ok
+  });
+
   if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(error.error_description || error.error || "Token exchange failed");
+    const errorText = await response.text().catch(() => "Could not read error response");
+    let errorData;
+    try {
+      errorData = JSON.parse(errorText);
+    } catch {
+      errorData = { raw: errorText };
+    }
+    
+    console.error("[TOKEN-EXCHANGE] Spotify API error:", {
+      status: response.status,
+      statusText: response.statusText,
+      error: errorData
+    });
+    
+    const errorMessage = errorData.error_description || errorData.error || errorText || "Token exchange failed";
+    throw new Error(errorMessage);
   }
 
   return await response.json();
@@ -117,11 +154,26 @@ export async function registerRoutes(
       if (!CLIENT_ID || !CLIENT_SECRET) {
         console.error(`[TOKEN-EXCHANGE-${requestId}] Missing credentials:`, {
           hasClientId: !!CLIENT_ID,
-          hasClientSecret: !!CLIENT_SECRET
+          clientIdLength: CLIENT_ID?.length || 0,
+          hasClientSecret: !!CLIENT_SECRET,
+          clientSecretLength: CLIENT_SECRET?.length || 0,
+          envClientId: !!process.env.SPOTIFY_CLIENT_ID,
+          envClientSecret: !!process.env.SPOTIFY_CLIENT_SECRET,
+          envClientIdLength: process.env.SPOTIFY_CLIENT_ID?.length || 0,
+          envClientSecretLength: process.env.SPOTIFY_CLIENT_SECRET?.length || 0
         });
         log("ERROR: SPOTIFY_CLIENT_ID or SPOTIFY_CLIENT_SECRET not configured", "spotify");
-        return res.status(500).json({ error: "Server configuration error" });
+        return res.status(500).json({ error: "Server configuration error: Missing CLIENT_ID or CLIENT_SECRET" });
       }
+
+      console.log(`[TOKEN-EXCHANGE-${requestId}] Credentials check passed:`, {
+        hasClientId: !!CLIENT_ID,
+        clientIdLength: CLIENT_ID.length,
+        clientIdPrefix: CLIENT_ID.substring(0, 8) + "...",
+        hasClientSecret: !!CLIENT_SECRET,
+        clientSecretLength: CLIENT_SECRET.length,
+        clientSecretPrefix: CLIENT_SECRET.substring(0, 8) + "..."
+      });
 
       // Normalize redirect URI - ensure it matches exactly what's in Spotify Console
       const normalizedRedirectUri = redirectUri.trim();
