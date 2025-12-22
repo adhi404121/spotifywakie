@@ -485,7 +485,7 @@ export default function Jukebox() {
       </div>
 
       {/* Controller Box */}
-      <Card className="relative w-full max-w-md bg-[#121212]/80 backdrop-blur-xl border-white/5 p-6 md:p-8 rounded-2xl shadow-2xl z-10">
+      <Card className="relative w-full max-w-md bg-[#121212]/80 backdrop-blur-xl border-white/5 p-6 md:p-8 rounded-2xl shadow-2xl z-10 overflow-visible">
         
         {/* Header */}
         <div className="text-center mb-8">
@@ -510,25 +510,33 @@ export default function Jukebox() {
         {/* Song Input */}
         <div className="space-y-4 mb-8">
           <div className="relative flex gap-2">
-            <div className="flex-1 relative">
+            <div className="flex-1 relative z-50">
               <Input 
                 type="text" 
                 placeholder="Search for a song..."
-                className="bg-[#282828] border-[#333] text-white placeholder:text-zinc-500 focus-visible:ring-[#1DB954]"
+                className="bg-[#282828] border-[#333] text-white placeholder:text-zinc-500 focus-visible:ring-[#1DB954] pr-10"
                 value={songInput}
                 onChange={(e) => {
                   setSongInput(e.target.value);
-                  setShowSuggestions(true);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    handleQueueSong();
-                  } else if (e.key === 'Escape') {
+                  if (e.target.value.trim().length >= 2) {
+                    setShowSuggestions(true);
+                  } else {
                     setShowSuggestions(false);
                   }
                 }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    setShowSuggestions(false);
+                    handleQueueSong();
+                  } else if (e.key === 'Escape') {
+                    setShowSuggestions(false);
+                  } else if (e.key === 'ArrowDown' && searchSuggestions.length > 0) {
+                    e.preventDefault();
+                    setShowSuggestions(true);
+                  }
+                }}
                 onFocus={() => {
-                  if (searchSuggestions.length > 0) {
+                  if (searchSuggestions.length > 0 && songInput.trim().length >= 2) {
                     setShowSuggestions(true);
                   }
                 }}
@@ -537,36 +545,61 @@ export default function Jukebox() {
                   setTimeout(() => setShowSuggestions(false), 200);
                 }}
               />
-              {/* Search Suggestions Dropdown */}
-              {showSuggestions && searchSuggestions.length > 0 && (
-                <div className="absolute z-50 w-full mt-1 bg-[#181818] border border-[#333] rounded-lg shadow-xl max-h-64 overflow-y-auto">
-                  {searchSuggestions.map((track) => (
-                    <div
-                      key={track.id}
-                      onClick={() => handleSelectSuggestion(track)}
-                      className="flex items-center gap-3 p-3 hover:bg-[#282828] cursor-pointer transition-colors border-b border-[#333] last:border-b-0"
-                    >
-                      {track.image && (
-                        <img 
-                          src={track.image} 
-                          alt={track.name}
-                          className="w-12 h-12 rounded object-cover"
-                        />
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-white font-medium truncate">{track.name}</p>
-                        <p className="text-zinc-400 text-sm truncate">{track.artist}</p>
-                        {track.album && (
-                          <p className="text-zinc-500 text-xs truncate">{track.album}</p>
-                        )}
-                      </div>
-                    </div>
-                  ))}
+              {isSearching && (
+                <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                  <div className="w-4 h-4 border-2 border-[#1DB954] border-t-transparent rounded-full animate-spin"></div>
                 </div>
               )}
-              {isSearching && (
-                <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                  <div className="w-4 h-4 border-2 border-[#1DB954] border-t-transparent rounded-full animate-spin"></div>
+              {/* Search Suggestions Dropdown */}
+              {showSuggestions && searchSuggestions.length > 0 && (
+                <div className="absolute z-[100] w-full mt-2 bg-[#181818] border border-[#1DB954]/30 rounded-lg shadow-2xl max-h-80 overflow-y-auto backdrop-blur-sm">
+                  <div className="p-2">
+                    <div className="text-xs text-zinc-500 px-3 py-2 font-semibold uppercase tracking-wider">
+                      Suggestions
+                    </div>
+                    {searchSuggestions.map((track, index) => (
+                      <div
+                        key={track.id}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleSelectSuggestion(track);
+                        }}
+                        onMouseDown={(e) => {
+                          e.preventDefault(); // Prevent input blur
+                        }}
+                        className="flex items-center gap-3 p-3 hover:bg-[#1DB954]/10 cursor-pointer transition-all rounded-md mb-1 group border border-transparent hover:border-[#1DB954]/20"
+                      >
+                        {track.image ? (
+                          <img 
+                            src={track.image} 
+                            alt={track.name}
+                            className="w-14 h-14 rounded-md object-cover flex-shrink-0 shadow-lg group-hover:shadow-[#1DB954]/20 transition-shadow"
+                          />
+                        ) : (
+                          <div className="w-14 h-14 rounded-md bg-[#282828] flex items-center justify-center flex-shrink-0">
+                            <Music2 className="w-6 h-6 text-zinc-500" />
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-white font-semibold truncate group-hover:text-[#1DB954] transition-colors">
+                            {track.name}
+                          </p>
+                          <p className="text-zinc-400 text-sm truncate mt-0.5">
+                            {track.artist}
+                          </p>
+                          {track.album && (
+                            <p className="text-zinc-500 text-xs truncate mt-0.5">
+                              {track.album}
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Plus className="w-5 h-5 text-[#1DB954]" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
