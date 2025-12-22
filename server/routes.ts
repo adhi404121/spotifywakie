@@ -1,6 +1,6 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import { storage, spotifyTokens } from "./storage.js";
+import { storage, spotifyTokens, radioPlaylist } from "./storage.js";
 import { log } from "./index.js";
 
 const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID || "";
@@ -101,6 +101,68 @@ async function spotifyApiCall(
   }
 
   return response;
+}
+
+// Get or create the radio playlist
+async function getOrCreateRadioPlaylist(): Promise<string> {
+  const existingPlaylistId = radioPlaylist.getPlaylistId();
+  if (existingPlaylistId) {
+    // Verify playlist still exists
+    try {
+      const checkRes = await spotifyApiCall(
+        `https://api.spotify.com/v1/playlists/${existingPlaylistId}`,
+        {},
+        false
+      );
+      if (checkRes.ok) {
+        return existingPlaylistId;
+      }
+    } catch (e) {
+      console.log("[PLAYLIST] Existing playlist not found, creating new one");
+      radioPlaylist.clearPlaylistId();
+    }
+  }
+
+  // Create new playlist
+  const accessToken = await getValidServerToken();
+  if (!accessToken) {
+    throw new Error("No valid access token available");
+  }
+
+  // Get user ID first
+  const userRes = await spotifyApiCall("https://api.spotify.com/v1/me", {}, false);
+  if (!userRes.ok) {
+    throw new Error("Failed to get user info");
+  }
+  const userData = await userRes.json();
+  const userId = userData.id;
+
+  // Create playlist
+  const createRes = await spotifyApiCall(
+    `https://api.spotify.com/v1/users/${userId}/playlists`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        name: "Radio Queue",
+        description: "Auto-generated playlist for radio queue",
+        public: false,
+      }),
+    },
+    false
+  );
+
+  if (!createRes.ok) {
+    const errorText = await createRes.text().catch(() => "Could not read error");
+    throw new Error(`Failed to create playlist: ${errorText}`);
+  }
+
+  const playlistData = await createRes.json();
+  radioPlaylist.setPlaylistId(playlistData.id);
+  log(`Radio playlist created: ${playlistData.id}`, "spotify");
+  return playlistData.id;
 }
 
 // Helper function to exchange authorization code for tokens
@@ -437,20 +499,33 @@ export async function registerRoutes(
         console.log(`[QUEUE-${requestId}] Found track URI:`, trackUri);
       }
 
-      // Add to queue
-      const queueUrl = `https://api.spotify.com/v1/me/player/queue?uri=${encodeURIComponent(trackUri)}`;
-      console.log(`[QUEUE-${requestId}] Adding to queue:`, { trackUri, queueUrl });
-      
-      const queueRes = await spotifyApiCall(queueUrl, { method: "POST" });
+      // Get or create radio playlist
+      const playlistId = await getOrCreateRadioPlaylist();
+      console.log(`[QUEUE-${requestId}] Using playlist:`, playlistId);
 
-      console.log(`[QUEUE-${requestId}] Queue response:`, {
-        status: queueRes.status,
-        statusText: queueRes.statusText,
-        ok: queueRes.ok
+      // Add track to playlist
+      const addUrl = `https://api.spotify.com/v1/playlists/${playlistId}/tracks`;
+      console.log(`[QUEUE-${requestId}] Adding to playlist:`, { trackUri, addUrl });
+      
+      const addRes = await spotifyApiCall(addUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          uris: [trackUri],
+          position: 0, // Add to beginning of playlist
+        }),
       });
 
-      if (!queueRes.ok && queueRes.status !== 204) {
-        const errorText = await queueRes.text().catch(() => "Could not read error response");
+      console.log(`[QUEUE-${requestId}] Playlist add response:`, {
+        status: addRes.status,
+        statusText: addRes.statusText,
+        ok: addRes.ok
+      });
+
+      if (!addRes.ok) {
+        const errorText = await addRes.text().catch(() => "Could not read error response");
         let errorData;
         try {
           errorData = JSON.parse(errorText);
@@ -458,19 +533,43 @@ export async function registerRoutes(
           errorData = { raw: errorText };
         }
         
-        console.error(`[QUEUE-${requestId}] Queue add failed:`, {
-          status: queueRes.status,
-          statusText: queueRes.statusText,
+        console.error(`[QUEUE-${requestId}] Playlist add failed:`, {
+          status: addRes.status,
+          statusText: addRes.statusText,
           error: errorData
         });
         
-        const errorMessage = errorData.error?.message || errorData.error || errorText || "Failed to add song to queue";
-        log(`Queue add error: ${queueRes.status} ${queueRes.statusText} - ${errorMessage}`, "spotify");
-        throw new Error(`Failed to add song to queue: ${errorMessage}`);
+        const errorMessage = errorData.error?.message || errorData.error || errorText || "Failed to add song to playlist";
+        log(`Playlist add error: ${addRes.status} ${addRes.statusText} - ${errorMessage}`, "spotify");
+        throw new Error(`Failed to add song: ${errorMessage}`);
       }
 
-      console.log(`[QUEUE-${requestId}] Successfully added to queue`);
-      res.json({ success: true, message: "Song added to queue" });
+      // Ensure playlist is playing (if not already playing)
+      try {
+        const playerRes = await spotifyApiCall(
+          "https://api.spotify.com/v1/me/player",
+          {},
+          false
+        );
+        if (playerRes.ok) {
+          const playerData = await playerRes.json();
+          // If not playing from our playlist, start playing it
+          if (!playerData.context || playerData.context.uri !== `spotify:playlist:${playlistId}`) {
+            await spotifyApiCall(
+              `https://api.spotify.com/v1/me/player/play?context_uri=spotify:playlist:${playlistId}`,
+              { method: "PUT" },
+              false
+            );
+            log("Started playing radio playlist", "spotify");
+          }
+        }
+      } catch (e) {
+        // Ignore errors - playback might not be available
+        console.log("[QUEUE] Could not ensure playlist is playing:", e);
+      }
+
+      console.log(`[QUEUE-${requestId}] Successfully added to playlist`);
+      res.json({ success: true, message: "Song added to radio queue" });
     } catch (error: any) {
       console.error(`[QUEUE-${requestId}] Queue endpoint error:`, {
         message: error.message,
@@ -651,15 +750,15 @@ export async function registerRoutes(
     }
   });
 
-  // Remove from queue (admin only - requires password)
+  // Remove from playlist queue (admin only - requires password)
   app.delete("/api/spotify/queue", async (req, res) => {
     const requestId = Math.random().toString(36).substring(7);
     try {
-      const { uri } = req.body;
+      const { uri, trackId } = req.body;
       const { password } = req.headers;
 
-      if (!uri) {
-        return res.status(400).json({ error: "Missing uri parameter" });
+      if (!uri && !trackId) {
+        return res.status(400).json({ error: "Missing uri or trackId parameter" });
       }
 
       // Password check - must be set in environment variables
@@ -672,37 +771,52 @@ export async function registerRoutes(
         return res.status(401).json({ error: "Unauthorized - Admin access required" });
       }
 
-      // Note: Spotify API doesn't have a direct "remove from queue" endpoint
-      // We'll need to skip to next track if it's the next one, or inform user
-      // For now, we'll return an error explaining the limitation
-      // In the future, we could implement a workaround by skipping tracks
+      // Get playlist ID
+      const playlistId = await getOrCreateRadioPlaylist();
       
-      // Check if the track is next in queue
-      const queueRes = await spotifyApiCall(
-        "https://api.spotify.com/v1/me/player/queue",
+      // Get current playlist snapshot_id for removal
+      const playlistInfoRes = await spotifyApiCall(
+        `https://api.spotify.com/v1/playlists/${playlistId}`,
         {},
         false
       );
-
-      if (queueRes.ok) {
-        const queueData = await queueRes.json();
-        const nextTrack = queueData.queue?.[0];
-        
-        if (nextTrack && nextTrack.uri === uri) {
-          // Skip to next track (removes current next from queue)
-          await spotifyApiCall("https://api.spotify.com/v1/me/player/next", {
-            method: "POST",
-          });
-          res.json({ success: true, message: "Track removed from queue" });
-        } else {
-          // Track is not next in queue - Spotify API limitation
-          res.status(400).json({ 
-            error: "Can only remove the next track in queue. Spotify API limitation." 
-          });
-        }
-      } else {
-        res.status(400).json({ error: "Unable to access queue" });
+      
+      if (!playlistInfoRes.ok) {
+        throw new Error("Failed to get playlist info");
       }
+      
+      const playlistInfo = await playlistInfoRes.json();
+      const snapshotId = playlistInfo.snapshot_id;
+
+      // Remove track from playlist
+      const removeRes = await spotifyApiCall(
+        `https://api.spotify.com/v1/playlists/${playlistId}/tracks`,
+        {
+          method: "DELETE",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            tracks: [{ uri: uri || `spotify:track:${trackId}` }],
+            snapshot_id: snapshotId,
+          }),
+        },
+        false
+      );
+
+      if (!removeRes.ok) {
+        const errorText = await removeRes.text().catch(() => "Could not read error");
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch {
+          errorData = { raw: errorText };
+        }
+        throw new Error(errorData.error?.message || errorData.error || "Failed to remove track");
+      }
+
+      log(`Track removed from playlist: ${uri || trackId}`, "spotify");
+      res.json({ success: true, message: "Track removed from queue" });
     } catch (error: any) {
       console.error(`[QUEUE-DELETE-${requestId}] Error:`, error.message);
       log(`Queue remove error: ${error.message}`, "spotify");

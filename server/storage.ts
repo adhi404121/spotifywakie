@@ -76,5 +76,23 @@ export class MemStorage implements IStorage {
   }
 }
 
+// Radio playlist storage
+class RadioPlaylistStorage {
+  private playlistId: string | null = null;
+
+  setPlaylistId(playlistId: string) {
+    this.playlistId = playlistId;
+  }
+
+  getPlaylistId(): string | null {
+    return this.playlistId;
+  }
+
+  clearPlaylistId() {
+    this.playlistId = null;
+  }
+}
+
 export const storage = new MemStorage();
 export const spotifyTokens = new SpotifyTokenStorage();
+export const radioPlaylist = new RadioPlaylistStorage();

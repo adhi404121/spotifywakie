@@ -492,7 +492,7 @@ export default function Jukebox() {
     setShowQueue(!showQueue);
   };
 
-  const handleRemoveFromQueue = async (uri: string) => {
+  const handleRemoveFromQueue = async (uri: string, trackId?: string) => {
     if (!isAuthenticated || !adminPassword) {
       toast({ 
         title: "Authentication Required", 
@@ -509,7 +509,7 @@ export default function Jukebox() {
           "Content-Type": "application/json",
           "password": adminPassword
         },
-        body: JSON.stringify({ uri }),
+        body: JSON.stringify({ uri, trackId }),
       });
 
       const data = await res.json();
