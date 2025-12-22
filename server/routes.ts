@@ -945,7 +945,25 @@ export async function registerRoutes(
       // Get playlist ID
       const playlistId = await getOrCreateRadioPlaylist();
       
-      // First, check if track exists in playlist
+      // Fetch playlist info once to get the current snapshot_id
+      const playlistInfoRes = await spotifyApiCall(
+        `https://api.spotify.com/v1/playlists/${playlistId}`,
+        {},
+        false
+      );
+      
+      if (!playlistInfoRes.ok) {
+        throw new Error("Failed to get playlist info");
+      }
+      
+      const playlistInfo = await playlistInfoRes.json();
+      const snapshotId = playlistInfo.snapshot_id;
+
+      if (!snapshotId) {
+        throw new Error("Failed to get playlist snapshot_id");
+      }
+
+      // Fetch playlist tracks (first 100) to locate the track
       const playlistTracksRes = await spotifyApiCall(
         `https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=100`,
         {},
@@ -957,14 +975,6 @@ export async function registerRoutes(
       }
 
       const playlistTracksData = await playlistTracksRes.json();
-      
-      // CRITICAL: Get snapshot_id from the tracks response (most up-to-date)
-      // The snapshot_id changes every time the playlist is modified
-      const snapshotId = playlistTracksData.snapshot_id;
-      
-      if (!snapshotId) {
-        throw new Error("Failed to get playlist snapshot_id");
-      }
       
       // Try to find track by URI (exact match)
       let trackInPlaylist = (playlistTracksData.items || []).find(
@@ -1002,7 +1012,7 @@ export async function registerRoutes(
         });
       }
 
-      // Remove track from playlist using the snapshot_id from the tracks response
+      // Remove track from playlist using the snapshot_id from the playlist info
       const removeRes = await spotifyApiCall(
         `https://api.spotify.com/v1/playlists/${playlistId}/tracks`,
         {
@@ -1039,12 +1049,8 @@ export async function registerRoutes(
       }
 
       // Verify removal by checking the response
-      const removeResponseData = await removeRes.json().catch(() => null);
-      
-      // Wait a moment for Spotify API to update, then verify
       await new Promise(resolve => setTimeout(resolve, 300));
       
-      // Verify the track was actually removed
       const verifyRes = await spotifyApiCall(
         `https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=100`,
         {},
