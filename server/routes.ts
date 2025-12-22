@@ -771,7 +771,34 @@ export async function registerRoutes(
         items: playlistData.items?.length || 0
       });
 
-      const tracks = (playlistData.items || [])
+      // Get immediate player queue first (these have highest priority)
+      let immediateQueue: any[] = [];
+      try {
+        const queueRes = await spotifyApiCall(
+          "https://api.spotify.com/v1/me/player/queue",
+          {},
+          false
+        );
+
+        if (queueRes.ok && queueRes.status !== 204) {
+          const queueData = await queueRes.json();
+          immediateQueue = (queueData.queue || []).map((track: any) => ({
+            id: track.id,
+            name: track.name,
+            artist: track.artists.map((a: any) => a.name).join(", "),
+            album: track.album.name,
+            image: track.album.images[0]?.url,
+            uri: track.uri,
+            duration_ms: track.duration_ms,
+            is_immediate: true, // Mark as immediate queue item
+          }));
+          console.log(`[QUEUE-GET-${requestId}] Immediate queue items:`, immediateQueue.length);
+        }
+      } catch (e) {
+        console.log(`[QUEUE-GET-${requestId}] Could not get immediate queue:`, e);
+      }
+
+      const playlistTracks = (playlistData.items || [])
         .filter((item: any) => item.track && !item.is_local) // Filter out null tracks and local files
         .map((item: any) => ({
           id: item.track.id,
@@ -782,7 +809,15 @@ export async function registerRoutes(
           uri: item.track.uri,
           duration_ms: item.track.duration_ms,
           snapshot_id: item.track.id, // For removal
+          is_immediate: false, // Mark as playlist item
         }));
+
+      // Remove duplicates - if a track is in immediate queue, don't show it again from playlist
+      const immediateUris = new Set(immediateQueue.map(t => t.uri));
+      const filteredPlaylistTracks = playlistTracks.filter(t => !immediateUris.has(t.uri));
+
+      // Combine: immediate queue first (highest priority), then playlist tracks
+      const allTracks = [...immediateQueue, ...filteredPlaylistTracks];
 
       // Get currently playing track
       let currentlyPlaying = null;
@@ -812,11 +847,13 @@ export async function registerRoutes(
       }
 
       console.log(`[QUEUE-GET-${requestId}] Returning queue:`, {
-        queueLength: tracks.length,
+        immediateQueueLength: immediateQueue.length,
+        playlistTracksLength: filteredPlaylistTracks.length,
+        totalTracks: allTracks.length,
         hasCurrentlyPlaying: !!currentlyPlaying
       });
 
-      res.json({ queue: tracks, currently_playing: currentlyPlaying });
+      res.json({ queue: allTracks, currently_playing: currentlyPlaying });
     } catch (error: any) {
       console.error(`[QUEUE-GET-${requestId}] Error:`, error.message);
       if (!res.headersSent) {
