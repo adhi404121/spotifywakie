@@ -550,55 +550,77 @@ export default function Jukebox() {
                   <div className="w-4 h-4 border-2 border-[#1DB954] border-t-transparent rounded-full animate-spin"></div>
                 </div>
               )}
-              {/* Search Suggestions Dropdown */}
+              {/* Search Suggestions Dropdown - Shows Upwards */}
               {showSuggestions && searchSuggestions.length > 0 && (
-                <div className="absolute z-[100] w-full mt-2 bg-[#181818] border border-[#1DB954]/30 rounded-lg shadow-2xl max-h-80 overflow-y-auto backdrop-blur-sm">
-                  <div className="p-2">
-                    <div className="text-xs text-zinc-500 px-3 py-2 font-semibold uppercase tracking-wider">
+                <div className="absolute z-[100] w-full bottom-full mb-2 bg-[#181818]/90 backdrop-blur-xl border border-[#1DB954]/40 rounded-xl shadow-2xl max-h-80 overflow-y-auto custom-scrollbar">
+                  <style>{`
+                    .custom-scrollbar::-webkit-scrollbar {
+                      width: 8px;
+                    }
+                    .custom-scrollbar::-webkit-scrollbar-track {
+                      background: rgba(40, 40, 40, 0.5);
+                      border-radius: 10px;
+                    }
+                    .custom-scrollbar::-webkit-scrollbar-thumb {
+                      background: linear-gradient(180deg, #1DB954 0%, #1ed760 100%);
+                      border-radius: 10px;
+                      border: 1px solid rgba(29, 185, 84, 0.3);
+                    }
+                    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+                      background: linear-gradient(180deg, #1ed760 0%, #1DB954 100%);
+                    }
+                  `}</style>
+                  <div className="p-3">
+                    <div className="text-xs text-[#1DB954] px-3 py-2 font-bold uppercase tracking-wider flex items-center gap-2">
+                      <Music2 className="w-3 h-3" />
                       Suggestions
                     </div>
-                    {searchSuggestions.map((track, index) => (
-                      <div
-                        key={track.id}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          handleSelectSuggestion(track);
-                        }}
-                        onMouseDown={(e) => {
-                          e.preventDefault(); // Prevent input blur
-                        }}
-                        className="flex items-center gap-3 p-3 hover:bg-[#1DB954]/10 cursor-pointer transition-all rounded-md mb-1 group border border-transparent hover:border-[#1DB954]/20"
-                      >
-                        {track.image ? (
-                          <img 
-                            src={track.image} 
-                            alt={track.name}
-                            className="w-14 h-14 rounded-md object-cover flex-shrink-0 shadow-lg group-hover:shadow-[#1DB954]/20 transition-shadow"
-                          />
-                        ) : (
-                          <div className="w-14 h-14 rounded-md bg-[#282828] flex items-center justify-center flex-shrink-0">
-                            <Music2 className="w-6 h-6 text-zinc-500" />
-                          </div>
-                        )}
-                        <div className="flex-1 min-w-0">
-                          <p className="text-white font-semibold truncate group-hover:text-[#1DB954] transition-colors">
-                            {track.name}
-                          </p>
-                          <p className="text-zinc-400 text-sm truncate mt-0.5">
-                            {track.artist}
-                          </p>
-                          {track.album && (
-                            <p className="text-zinc-500 text-xs truncate mt-0.5">
-                              {track.album}
-                            </p>
+                    <div className="space-y-1">
+                      {searchSuggestions.map((track, index) => (
+                        <div
+                          key={track.id}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            handleSelectSuggestion(track);
+                          }}
+                          onMouseDown={(e) => {
+                            e.preventDefault(); // Prevent input blur
+                          }}
+                          className="flex items-center gap-3 p-3 hover:bg-[#1DB954]/20 cursor-pointer transition-all rounded-lg group border border-transparent hover:border-[#1DB954]/40 hover:shadow-lg hover:shadow-[#1DB954]/10 backdrop-blur-sm bg-[#282828]/30"
+                        >
+                          {track.image ? (
+                            <img 
+                              src={track.image} 
+                              alt={track.name}
+                              className="w-14 h-14 rounded-lg object-cover flex-shrink-0 shadow-lg group-hover:shadow-[#1DB954]/30 transition-all group-hover:scale-105"
+                            />
+                          ) : (
+                            <div className="w-14 h-14 rounded-lg bg-gradient-to-br from-[#1DB954]/20 to-[#282828] flex items-center justify-center flex-shrink-0 border border-[#1DB954]/20 group-hover:border-[#1DB954]/40 transition-colors">
+                              <Music2 className="w-6 h-6 text-[#1DB954]" />
+                            </div>
                           )}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-white font-semibold truncate group-hover:text-[#1DB954] transition-colors">
+                              {track.name}
+                            </p>
+                            <p className="text-zinc-400 text-sm truncate mt-0.5 group-hover:text-zinc-300 transition-colors">
+                              {track.artist}
+                            </p>
+                            {track.album && (
+                              <p className="text-zinc-500 text-xs truncate mt-0.5 group-hover:text-zinc-400 transition-colors">
+                                {track.album}
+                              </p>
+                            )}
+                          </div>
+                          <div className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-all transform group-hover:scale-110">
+                            <div className="w-8 h-8 rounded-full bg-[#1DB954]/20 flex items-center justify-center border border-[#1DB954]/40">
+                              <Plus className="w-4 h-4 text-[#1DB954]" />
+                            </div>
+                          </div>
                         </div>
-                        <div className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <Plus className="w-5 h-5 text-[#1DB954]" />
-                        </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
                 </div>
               )}
