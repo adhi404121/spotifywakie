@@ -29,6 +29,16 @@ const SCOPES = [
 
 // Server-side authentication - no client-side token storage needed
 
+interface SearchTrack {
+  id: string;
+  name: string;
+  artist: string;
+  album: string;
+  image: string | null;
+  uri: string;
+  duration_ms: number;
+}
+
 export default function Jukebox() {
   const { toast } = useToast();
   const [songInput, setSongInput] = useState("");
@@ -40,6 +50,11 @@ export default function Jukebox() {
   const [isRedirecting, setIsRedirecting] = useState(false);
   const [adminPassword, setAdminPassword] = useState<string | null>(null); // Store entered password
   
+  // Search suggestions state
+  const [searchSuggestions, setSearchSuggestions] = useState<SearchTrack[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
+  
   // State for UI
   const [isPlaying, setIsPlaying] = useState(false);
   const [volume, setVolume] = useState([50]);
@@ -50,11 +65,27 @@ export default function Jukebox() {
   });
 
   useEffect(() => {
+    console.log("[CLIENT] Component mounted, checking server auth...");
+    console.log("[CLIENT] Environment check:", {
+      hasClientId: !!CLIENT_ID,
+      hasRedirectUri: !!REDIRECT_URI,
+      redirectUri: REDIRECT_URI,
+      hasAdminPassword: !!ADMIN_PASSWORD
+    });
+    
     const checkServerAuth = async () => {
       // Check if server is authenticated with Spotify
+      console.log("[CLIENT] Checking server auth status...");
       try {
+        console.log("[CLIENT] Fetching /api/spotify/status...");
         const res = await fetch("/api/spotify/status");
+        console.log("[CLIENT] Status response:", {
+          ok: res.ok,
+          status: res.status,
+          statusText: res.statusText
+        });
         const data = await res.json();
+        console.log("[CLIENT] Status data:", data);
         
         if (data.authenticated) {
           setSpotifyToken("server-authenticated"); // Just a flag
@@ -278,8 +309,55 @@ export default function Jukebox() {
     }
   };
 
-  const handleQueueSong = async () => {
-    if (!songInput.trim()) {
+  // Search for suggestions
+  useEffect(() => {
+    if (!songInput.trim() || songInput.trim().startsWith("spotify:track:")) {
+      setSearchSuggestions([]);
+      setShowSuggestions(false);
+      return;
+    }
+
+    const searchTimeout = setTimeout(async () => {
+      if (!songInput.trim() || songInput.trim().length < 2) {
+        setSearchSuggestions([]);
+        setShowSuggestions(false);
+        return;
+      }
+
+      setIsSearching(true);
+      try {
+        const res = await fetch(`/api/spotify/search?q=${encodeURIComponent(songInput.trim())}&limit=8`);
+        if (res.ok) {
+          const data = await res.json();
+          setSearchSuggestions(data.tracks || []);
+          setShowSuggestions(data.tracks?.length > 0);
+        } else {
+          setSearchSuggestions([]);
+          setShowSuggestions(false);
+        }
+      } catch (e) {
+        console.error("Search error:", e);
+        setSearchSuggestions([]);
+        setShowSuggestions(false);
+      } finally {
+        setIsSearching(false);
+      }
+    }, 300); // Debounce 300ms
+
+    return () => clearTimeout(searchTimeout);
+  }, [songInput]);
+
+  const handleSelectSuggestion = (track: SearchTrack) => {
+    setSongInput(`${track.name} - ${track.artist}`);
+    setShowSuggestions(false);
+    setSearchSuggestions([]);
+    // Automatically queue the selected song
+    handleQueueSongWithUri(track.uri);
+  };
+
+  const handleQueueSongWithUri = async (uri?: string) => {
+    const songToQueue = uri || songInput.trim();
+    if (!songToQueue) {
       toast({ title: "Empty Input", description: "Please enter a song name or Spotify URI", variant: "destructive" });
       return;
     }
@@ -290,8 +368,8 @@ export default function Jukebox() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-          songName: songInput.trim().startsWith("spotify:track:") ? undefined : songInput.trim(),
-          uri: songInput.trim().startsWith("spotify:track:") ? songInput.trim() : undefined
+          songName: songToQueue.startsWith("spotify:track:") ? undefined : songToQueue,
+          uri: songToQueue.startsWith("spotify:track:") ? songToQueue : uri
         }),
       });
 
@@ -312,6 +390,8 @@ export default function Jukebox() {
         className: "text-spotify-green border-spotify-green" 
       });
       setSongInput("");
+      setShowSuggestions(false);
+      setSearchSuggestions([]);
       
       // Refresh now playing
       setTimeout(() => fetchNowPlaying(), 500);
@@ -319,6 +399,10 @@ export default function Jukebox() {
       console.error("Queue error:", e);
       toast({ title: "Network Error", description: "Failed to add song", variant: "destructive" });
     }
+  };
+
+  const handleQueueSong = () => {
+    handleQueueSongWithUri();
   };
 
   const executeAdminAction = (action: () => void) => {
@@ -425,15 +509,67 @@ export default function Jukebox() {
 
         {/* Song Input */}
         <div className="space-y-4 mb-8">
-          <div className="flex gap-2">
-            <Input 
-              type="text" 
-              placeholder="Song Name or Spotify URI..."
-              className="bg-[#282828] border-[#333] text-white placeholder:text-zinc-500 focus-visible:ring-[#1DB954]"
-              value={songInput}
-              onChange={(e) => setSongInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleQueueSong()}
-            />
+          <div className="relative flex gap-2">
+            <div className="flex-1 relative">
+              <Input 
+                type="text" 
+                placeholder="Search for a song..."
+                className="bg-[#282828] border-[#333] text-white placeholder:text-zinc-500 focus-visible:ring-[#1DB954]"
+                value={songInput}
+                onChange={(e) => {
+                  setSongInput(e.target.value);
+                  setShowSuggestions(true);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    handleQueueSong();
+                  } else if (e.key === 'Escape') {
+                    setShowSuggestions(false);
+                  }
+                }}
+                onFocus={() => {
+                  if (searchSuggestions.length > 0) {
+                    setShowSuggestions(true);
+                  }
+                }}
+                onBlur={() => {
+                  // Delay to allow click on suggestion
+                  setTimeout(() => setShowSuggestions(false), 200);
+                }}
+              />
+              {/* Search Suggestions Dropdown */}
+              {showSuggestions && searchSuggestions.length > 0 && (
+                <div className="absolute z-50 w-full mt-1 bg-[#181818] border border-[#333] rounded-lg shadow-xl max-h-64 overflow-y-auto">
+                  {searchSuggestions.map((track) => (
+                    <div
+                      key={track.id}
+                      onClick={() => handleSelectSuggestion(track)}
+                      className="flex items-center gap-3 p-3 hover:bg-[#282828] cursor-pointer transition-colors border-b border-[#333] last:border-b-0"
+                    >
+                      {track.image && (
+                        <img 
+                          src={track.image} 
+                          alt={track.name}
+                          className="w-12 h-12 rounded object-cover"
+                        />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-white font-medium truncate">{track.name}</p>
+                        <p className="text-zinc-400 text-sm truncate">{track.artist}</p>
+                        {track.album && (
+                          <p className="text-zinc-500 text-xs truncate">{track.album}</p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {isSearching && (
+                <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                  <div className="w-4 h-4 border-2 border-[#1DB954] border-t-transparent rounded-full animate-spin"></div>
+                </div>
+              )}
+            </div>
             <Button 
               onClick={handleQueueSong}
               className="bg-[#1DB954] hover:bg-[#1ed760] text-black font-bold shrink-0"

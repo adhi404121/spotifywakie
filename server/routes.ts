@@ -12,23 +12,37 @@ async function getValidServerToken(): Promise<string | null> {
     return null;
   }
 
-  // Check if token needs refresh
+  // Check if token needs refresh (refresh 5 minutes before expiration)
   if (spotifyTokens.isTokenExpired()) {
     const refreshToken = spotifyTokens.getRefreshToken();
     if (!refreshToken) {
+      log("No refresh token available", "spotify");
       return null;
     }
 
     try {
       log("Refreshing server Spotify token...", "spotify");
+      console.log("[TOKEN-REFRESH] Attempting token refresh...");
       const tokens = await refreshAccessToken(refreshToken);
+      
+      console.log("[TOKEN-REFRESH] Token refresh successful:", {
+        hasAccessToken: !!tokens.access_token,
+        hasRefreshToken: !!tokens.refresh_token,
+        expiresIn: tokens.expires_in
+      });
+      
       spotifyTokens.setTokens(
         tokens.access_token,
         tokens.refresh_token || refreshToken,
         tokens.expires_in || 3600
       );
+      log("Token refreshed successfully", "spotify");
       return tokens.access_token;
     } catch (error: any) {
+      console.error("[TOKEN-REFRESH] Token refresh failed:", {
+        message: error.message,
+        stack: error.stack
+      });
       log(`Token refresh failed: ${error.message}`, "spotify");
       spotifyTokens.clearTokens();
       return null;
@@ -36,6 +50,57 @@ async function getValidServerToken(): Promise<string | null> {
   }
 
   return spotifyTokens.getAccessToken();
+}
+
+// Helper to make Spotify API calls with automatic token refresh on 401
+async function spotifyApiCall(
+  url: string,
+  options: RequestInit = {},
+  retryOn401 = true
+): Promise<Response> {
+  let accessToken = await getValidServerToken();
+  if (!accessToken) {
+    throw new Error("No valid access token available");
+  }
+
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      ...options.headers,
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  // If 401 and retry enabled, try refreshing token once
+  if (response.status === 401 && retryOn401) {
+    console.log("[SPOTIFY-API] Got 401, attempting token refresh and retry...");
+    const refreshToken = spotifyTokens.getRefreshToken();
+    if (refreshToken) {
+      try {
+        const tokens = await refreshAccessToken(refreshToken);
+        spotifyTokens.setTokens(
+          tokens.access_token,
+          tokens.refresh_token || refreshToken,
+          tokens.expires_in || 3600
+        );
+        
+        // Retry with new token
+        accessToken = tokens.access_token;
+        return await fetch(url, {
+          ...options,
+          headers: {
+            ...options.headers,
+            Authorization: `Bearer ${accessToken}`,
+          },
+        });
+      } catch (error: any) {
+        console.error("[SPOTIFY-API] Token refresh on 401 failed:", error.message);
+        throw new Error("Authentication failed: Token refresh unsuccessful");
+      }
+    }
+  }
+
+  return response;
 }
 
 // Helper function to exchange authorization code for tokens
@@ -102,6 +167,10 @@ async function exchangeCodeForTokens(code: string, redirectUri: string) {
 
 // Helper function to refresh access token
 async function refreshAccessToken(refreshToken: string) {
+  if (!CLIENT_ID || !CLIENT_SECRET) {
+    throw new Error("CLIENT_ID or CLIENT_SECRET not configured");
+  }
+
   const authString = Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString("base64");
   
   const response = await fetch("https://accounts.spotify.com/api/token", {
@@ -117,8 +186,22 @@ async function refreshAccessToken(refreshToken: string) {
   });
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(error.error_description || error.error || "Token refresh failed");
+    const errorText = await response.text().catch(() => "Could not read error response");
+    let errorData;
+    try {
+      errorData = JSON.parse(errorText);
+    } catch {
+      errorData = { raw: errorText };
+    }
+    
+    console.error("[TOKEN-REFRESH] Spotify API error:", {
+      status: response.status,
+      statusText: response.statusText,
+      error: errorData
+    });
+    
+    const errorMessage = errorData.error_description || errorData.error || errorText || "Token refresh failed";
+    throw new Error(errorMessage);
   }
 
   return await response.json();
@@ -311,9 +394,7 @@ export async function registerRoutes(
         const searchUrl = `https://api.spotify.com/v1/search?q=${encodeURIComponent(songName)}&type=track&limit=1`;
         console.log(`[QUEUE-${requestId}] Searching for song:`, { songName, searchUrl });
         
-        const searchRes = await fetch(searchUrl, {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        });
+        const searchRes = await spotifyApiCall(searchUrl);
 
         console.log(`[QUEUE-${requestId}] Search response:`, {
           status: searchRes.status,
@@ -360,10 +441,7 @@ export async function registerRoutes(
       const queueUrl = `https://api.spotify.com/v1/me/player/queue?uri=${encodeURIComponent(trackUri)}`;
       console.log(`[QUEUE-${requestId}] Adding to queue:`, { trackUri, queueUrl });
       
-      const queueRes = await fetch(queueUrl, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
+      const queueRes = await spotifyApiCall(queueUrl, { method: "POST" });
 
       console.log(`[QUEUE-${requestId}] Queue response:`, {
         status: queueRes.status,
@@ -422,42 +500,31 @@ export async function registerRoutes(
         return res.status(401).json({ error: "Unauthorized" });
       }
 
-      const accessToken = await getValidServerToken();
-      if (!accessToken) {
-        return res.status(401).json({ 
-          error: "Server not authenticated with Spotify" 
-        });
-      }
-
       let response;
       switch (action) {
         case "play":
-          response = await fetch("https://api.spotify.com/v1/me/player/play", {
+          response = await spotifyApiCall("https://api.spotify.com/v1/me/player/play", {
             method: "PUT",
-            headers: { Authorization: `Bearer ${accessToken}` },
           });
           break;
         case "pause":
-          response = await fetch("https://api.spotify.com/v1/me/player/pause", {
+          response = await spotifyApiCall("https://api.spotify.com/v1/me/player/pause", {
             method: "PUT",
-            headers: { Authorization: `Bearer ${accessToken}` },
           });
           break;
         case "next":
-          response = await fetch("https://api.spotify.com/v1/me/player/next", {
+          response = await spotifyApiCall("https://api.spotify.com/v1/me/player/next", {
             method: "POST",
-            headers: { Authorization: `Bearer ${accessToken}` },
           });
           break;
         case "volume":
           if (volume === undefined) {
             return res.status(400).json({ error: "Volume value required" });
           }
-          response = await fetch(
+          response = await spotifyApiCall(
             `https://api.spotify.com/v1/me/player/volume?volume_percent=${volume}`,
             {
               method: "PUT",
-              headers: { Authorization: `Bearer ${accessToken}` },
             }
           );
           break;
@@ -477,6 +544,69 @@ export async function registerRoutes(
     }
   });
 
+  // Search suggestions endpoint (for autocomplete)
+  app.get("/api/spotify/search", async (req, res) => {
+    const requestId = Math.random().toString(36).substring(7);
+    try {
+      const { q, limit = "10" } = req.query;
+
+      if (!q || typeof q !== "string") {
+        return res.status(400).json({ error: "Missing query parameter 'q'" });
+      }
+
+      const searchUrl = `https://api.spotify.com/v1/search?q=${encodeURIComponent(q)}&type=track&limit=${Math.min(parseInt(limit as string) || 10, 20)}`;
+      console.log(`[SEARCH-${requestId}] Search request:`, { q, limit, searchUrl });
+
+      const searchRes = await spotifyApiCall(searchUrl);
+
+      if (!searchRes.ok) {
+        const errorText = await searchRes.text().catch(() => "Could not read error response");
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch {
+          errorData = { raw: errorText };
+        }
+        
+        console.error(`[SEARCH-${requestId}] Search failed:`, {
+          status: searchRes.status,
+          statusText: searchRes.statusText,
+          error: errorData
+        });
+        
+        return res.status(searchRes.status).json({ 
+          error: errorData.error?.message || errorData.error || "Search failed" 
+        });
+      }
+
+      const searchData = await searchRes.json();
+      const tracks = (searchData.tracks?.items || []).map((track: any) => ({
+        id: track.id,
+        name: track.name,
+        artist: track.artists.map((a: any) => a.name).join(", "),
+        album: track.album.name,
+        image: track.album.images[0]?.url,
+        uri: track.uri,
+        duration_ms: track.duration_ms,
+      }));
+
+      console.log(`[SEARCH-${requestId}] Search results:`, {
+        total: searchData.tracks?.total || 0,
+        returned: tracks.length
+      });
+
+      res.json({ tracks, total: searchData.tracks?.total || 0 });
+    } catch (error: any) {
+      console.error(`[SEARCH-${requestId}] Search endpoint error:`, {
+        message: error.message,
+        stack: error.stack
+      });
+      if (!res.headersSent) {
+        res.status(500).json({ error: error.message || "Search failed" });
+      }
+    }
+  });
+
   // Get currently playing (no auth required)
   app.get("/api/spotify/now-playing", async (req, res) => {
     try {
@@ -485,32 +615,39 @@ export async function registerRoutes(
         return res.json({ playing: false, track: null });
       }
 
-      const response = await fetch(
-        "https://api.spotify.com/v1/me/player/currently-playing",
-        {
-          headers: { Authorization: `Bearer ${accessToken}` },
+      try {
+        const response = await spotifyApiCall(
+          "https://api.spotify.com/v1/me/player/currently-playing",
+          {},
+          false // Don't retry on 401 for now-playing (it's okay if not playing)
+        );
+
+        if (response.status === 204) {
+          return res.json({ playing: false, track: null });
         }
-      );
 
-      if (response.status === 204) {
-        return res.json({ playing: false, track: null });
+        if (!response.ok) {
+          return res.json({ playing: false, track: null });
+        }
+
+        const data = await response.json();
+        res.json({
+          playing: data.is_playing || false,
+          track: data.item
+            ? {
+                name: data.item.name,
+                artist: data.item.artists.map((a: any) => a.name).join(", "),
+                image: data.item.album.images[0]?.url,
+              }
+            : null,
+        });
+      } catch (apiError: any) {
+        // If it's a "no token" error, just return not playing
+        if (apiError.message?.includes("No valid access token")) {
+          return res.json({ playing: false, track: null });
+        }
+        throw apiError;
       }
-
-      if (!response.ok) {
-        return res.json({ playing: false, track: null });
-      }
-
-      const data = await response.json();
-      res.json({
-        playing: data.is_playing || false,
-        track: data.item
-          ? {
-              name: data.item.name,
-              artist: data.item.artists.map((a: any) => a.name).join(", "),
-              image: data.item.album.images[0]?.url,
-            }
-          : null,
-      });
     } catch (error: any) {
       log(`Now playing error: ${error.message}`, "spotify");
       res.json({ playing: false, track: null });
