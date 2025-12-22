@@ -261,18 +261,32 @@ export default function Jukebox() {
       const data = await res.json();
       
       if (data.track) {
-        setCurrentTrack({
+        const newTrack = {
           name: data.track.name,
           artist: data.track.artist,
           image: data.track.image
-        });
+        };
+        
+        // Only update if track actually changed (avoid unnecessary re-renders)
+        if (currentTrack.name !== newTrack.name || currentTrack.artist !== newTrack.artist) {
+          setCurrentTrack(newTrack);
+          // If queue is open, refresh it when track changes
+          if (showQueue) {
+            fetchQueue();
+          }
+        }
         setIsPlaying(data.playing);
       } else {
-        setCurrentTrack({
+        const emptyTrack = {
           name: "Ready to Play",
           artist: "Queue a song to start",
           image: null
-        });
+        };
+        
+        // Only update if not already showing empty state
+        if (currentTrack.name !== emptyTrack.name) {
+          setCurrentTrack(emptyTrack);
+        }
         setIsPlaying(false);
       }
     } catch (e) {
