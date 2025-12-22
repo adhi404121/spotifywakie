@@ -944,53 +944,47 @@ export async function registerRoutes(
 
       // Get playlist ID
       const playlistId = await getOrCreateRadioPlaylist();
-      
-      // Fetch playlist tracks (first 100) to locate the track
-      const playlistTracksRes = await spotifyApiCall(
-        `https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=100`,
-        {},
-        false
-      );
 
-      if (!playlistTracksRes.ok) {
-        throw new Error("Failed to get playlist tracks");
-      }
-
-      const playlistTracksData = await playlistTracksRes.json();
-      
-      // Try to find track by URI (exact match)
-      let trackInPlaylist = (playlistTracksData.items || []).find(
-        (item: any) => item.track && item.track.uri === trackUri
-      );
-      
-      // If not found, try matching by track ID (in case URI format differs)
-      if (!trackInPlaylist) {
-        // Extract track ID from URI if needed
-        let searchTrackId = trackId;
-        if (!searchTrackId && trackUri) {
-          const match = trackUri.match(/spotify:track:([a-zA-Z0-9]+)/);
-          if (match) {
-            searchTrackId = match[1];
-          }
-        }
-        
-        if (searchTrackId) {
-          const trackIdOnly = searchTrackId.replace("spotify:track:", "");
-          trackInPlaylist = (playlistTracksData.items || []).find(
-            (item: any) => item.track && item.track.id === trackIdOnly
+      // Helper to find track in playlist with pagination (up to 500 tracks)
+      const findTrackInPlaylist = async (): Promise<string | null> => {
+        const limit = 100;
+        for (let offset = 0; offset < 500; offset += limit) {
+          const tracksRes = await spotifyApiCall(
+            `https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=${limit}&offset=${offset}`,
+            {},
+            false
           );
-          if (trackInPlaylist) {
-            // Update trackUri to match what's actually in playlist
-            trackUri = trackInPlaylist.track.uri;
-          }
-        }
-      }
+          if (!tracksRes.ok) return null;
+          const data = await tracksRes.json();
+          const items = data.items || [];
 
-      if (!trackInPlaylist) {
+          // Try URI match
+          const byUri = items.find((item: any) => item.track && item.track.uri === trackUri);
+          if (byUri) return byUri.track.uri;
+
+          // Try ID match
+          let searchTrackId = trackId;
+          if (!searchTrackId && trackUri) {
+            const match = trackUri.match(/spotify:track:([a-zA-Z0-9]+)/);
+            if (match) searchTrackId = match[1];
+          }
+          if (searchTrackId) {
+            const idOnly = searchTrackId.replace("spotify:track:", "");
+            const byId = items.find((item: any) => item.track && item.track.id === idOnly);
+            if (byId) return byId.track.uri;
+          }
+
+          if (items.length < limit) break; // no more pages
+        }
+        return null;
+      };
+
+      const uriToRemove = await findTrackInPlaylist();
+      if (!uriToRemove) {
         console.error(`[QUEUE-DELETE-${requestId}] Track not found. URI: ${trackUri}, TrackId: ${trackId}`);
-        return res.status(404).json({ 
+        return res.status(404).json({
           error: "Track not found in playlist",
-          details: "Track may be in immediate queue only or already removed"
+          details: "Track may be in immediate queue only or already removed",
         });
       }
 
@@ -1003,7 +997,7 @@ export async function registerRoutes(
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            tracks: [{ uri: trackUri }],
+            tracks: [{ uri: uriToRemove }],
           }),
         },
         false
@@ -1022,34 +1016,22 @@ export async function registerRoutes(
           status: removeRes.status,
           statusText: removeRes.statusText,
           error: errorData,
-          trackUri: trackUri
+          trackUri: uriToRemove,
         });
         
         throw new Error(errorData.error?.message || errorData.error || "Failed to remove track");
       }
 
-      // Verify removal by checking the response
-      await new Promise(resolve => setTimeout(resolve, 300));
-      
-      const verifyRes = await spotifyApiCall(
-        `https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=100`,
-        {},
-        false
-      );
-      
-      if (verifyRes.ok) {
-        const verifyData = await verifyRes.json();
-        const stillExists = (verifyData.items || []).some(
-          (item: any) => item.track && item.track.uri === trackUri
-        );
-        
-        if (stillExists) {
-          console.error(`[QUEUE-DELETE-${requestId}] Track still exists after removal attempt`);
-          throw new Error("Track removal may have failed - track still in playlist");
-        }
+      // Wait briefly for Spotify to update, then verify removal
+      await new Promise(resolve => setTimeout(resolve, 800));
+
+      const verifyFound = await findTrackInPlaylist();
+      if (verifyFound) {
+        console.error(`[QUEUE-DELETE-${requestId}] Track still exists after removal attempt`);
+        throw new Error("Track removal may have failed - track still in playlist");
       }
 
-      log(`Track removed from playlist: ${trackUri}`, "spotify");
+      log(`Track removed from playlist: ${uriToRemove}`, "spotify");
       res.json({ success: true, message: "Track removed from queue" });
     } catch (error: any) {
       console.error(`[QUEUE-DELETE-${requestId}] Error:`, {

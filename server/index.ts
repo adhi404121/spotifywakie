@@ -49,10 +49,14 @@ app.use((req, res, next) => {
   res.on("finish", () => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
+      // Skip noisy endpoints
+      if (path.includes("/api/spotify/queue") || path.includes("/api/spotify/now-playing")) {
+        return;
+      }
+
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      // Don't log queue responses (too large and noisy)
-      if (capturedJsonResponse && !path.includes("/api/spotify/queue")) {
-        // Limit response size for logging
+      // Limit response size for logging
+      if (capturedJsonResponse) {
         const responseStr = JSON.stringify(capturedJsonResponse);
         if (responseStr.length < 200) {
           logLine += ` :: ${responseStr}`;
