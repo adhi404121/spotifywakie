@@ -499,15 +499,8 @@ export async function registerRoutes(
         console.log(`[QUEUE-${requestId}] Found track URI:`, trackUri);
       }
 
-      // Get or create radio playlist
-      const playlistId = await getOrCreateRadioPlaylist();
-      console.log(`[QUEUE-${requestId}] Using playlist:`, playlistId);
-
-      // Strategy: Add to immediate queue for priority, then add to playlist for persistence
-      // This ensures newly queued songs play before existing playlist songs
-      
-      // Step 1: Add to immediate player queue (highest priority - plays next)
-      // IMPORTANT: This must succeed for songs to play in the correct order
+      // Add to immediate player queue only (temporary queue)
+      // IMPORTANT: This must succeed; no playlist fallback
       let queueAdded = false;
       try {
         // First, ensure player is active (queue API requires active player)
@@ -536,64 +529,15 @@ export async function registerRoutes(
             statusText: queueRes.statusText,
             error: errorText
           });
-          // Don't fail completely - still add to playlist
         }
       } catch (e: any) {
         console.error(`[QUEUE-${requestId}] ❌ Exception adding to immediate queue:`, {
           message: e.message,
           stack: e.stack
         });
-        // Continue to add to playlist as fallback
       }
 
-      // Step 2: Also add to playlist at position 0 for persistence and queue view
-      const addUrl = `https://api.spotify.com/v1/playlists/${playlistId}/tracks`;
-      console.log(`[QUEUE-${requestId}] Adding to playlist:`, { trackUri, addUrl });
-      
-      const addRes = await spotifyApiCall(addUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          uris: [trackUri],
-          position: 0, // Add to beginning of playlist (most recent first)
-        }),
-      });
-
-      console.log(`[QUEUE-${requestId}] Playlist add response:`, {
-        status: addRes.status,
-        statusText: addRes.statusText,
-        ok: addRes.ok
-      });
-
-      if (!addRes.ok) {
-        const errorText = await addRes.text().catch(() => "Could not read error response");
-        let errorData;
-        try {
-          errorData = JSON.parse(errorText);
-        } catch {
-          errorData = { raw: errorText };
-        }
-        
-        console.error(`[QUEUE-${requestId}] Playlist add failed:`, {
-          status: addRes.status,
-          statusText: addRes.statusText,
-          error: errorData
-        });
-        
-        // If queue add succeeded but playlist add failed, still return success
-        if (queueAdded) {
-          console.log(`[QUEUE-${requestId}] Queue add succeeded, but playlist add failed - continuing`);
-        } else {
-          const errorMessage = errorData.error?.message || errorData.error || errorText || "Failed to add song to playlist";
-          log(`Playlist add error: ${addRes.status} ${addRes.statusText} - ${errorMessage}`, "spotify");
-          throw new Error(`Failed to add song: ${errorMessage}`);
-        }
-      }
-
-      // Ensure playback is active - but prioritize immediate queue over playlist context
-      // CRITICAL: If immediate queue is active, don't set playlist context (it overrides queue)
+      // Ensure playback is active (do not change context)
       try {
         const playerRes = await spotifyApiCall(
           "https://api.spotify.com/v1/me/player",
@@ -605,7 +549,6 @@ export async function registerRoutes(
           const playerData = await playerRes.json();
           const isPlaying = playerData.is_playing;
           
-          // If we successfully added to immediate queue, prioritize it
           if (queueAdded) {
             console.log(`[QUEUE-${requestId}] Immediate queue active - not setting playlist context`);
             // Just ensure playback is active (don't change context - that would clear the queue)
@@ -617,17 +560,7 @@ export async function registerRoutes(
               console.log(`[QUEUE-${requestId}] Playback already active with immediate queue`);
             }
           } else {
-            // Immediate queue failed, fall back to playlist
-            console.log(`[QUEUE-${requestId}] Immediate queue failed, using playlist context`);
-            if (!playerData.context || playerData.context.uri !== `spotify:playlist:${playlistId}`) {
-              await spotifyApiCall(
-                `https://api.spotify.com/v1/me/player/play?context_uri=spotify:playlist:${playlistId}`,
-                { method: "PUT" },
-                false
-              );
-              log("Started playing radio playlist", "spotify");
-              console.log(`[QUEUE-${requestId}] Started playing from playlist`);
-            }
+            throw new Error("Failed to add song to queue");
           }
         } else if (playerRes.status === 204) {
           // No active player
@@ -636,13 +569,7 @@ export async function registerRoutes(
             console.log(`[QUEUE-${requestId}] Starting playback with immediate queue`);
             await spotifyApiCall("https://api.spotify.com/v1/me/player/play", { method: "PUT" }, false);
           } else {
-            // Start with playlist
-            console.log(`[QUEUE-${requestId}] No active player, starting playlist playback`);
-            await spotifyApiCall(
-              `https://api.spotify.com/v1/me/player/play?context_uri=spotify:playlist:${playlistId}`,
-              { method: "PUT" },
-              false
-            );
+            throw new Error("Failed to add song to queue");
           }
         }
       } catch (e) {
@@ -650,8 +577,8 @@ export async function registerRoutes(
         console.log(`[QUEUE-${requestId}] Could not ensure playback:`, e);
       }
 
-      console.log(`[QUEUE-${requestId}] Successfully added to playlist`);
-      res.json({ success: true, message: "Song added to radio queue" });
+      console.log(`[QUEUE-${requestId}] Successfully added to queue`);
+      res.json({ success: true, message: "Song added to queue" });
     } catch (error: any) {
       console.error(`[QUEUE-${requestId}] Queue endpoint error:`, {
         message: error.message,
@@ -798,28 +725,14 @@ export async function registerRoutes(
     }
   });
 
-  // Get current queue (playlist-based, anyone can view)
+  // Get current queue (immediate queue only, anyone can view)
   app.get("/api/spotify/queue", async (req, res) => {
     const requestId = Math.random().toString(36).substring(7);
     try {
-      // Get or create playlist
-      const playlistId = await getOrCreateRadioPlaylist();
-      
-      // Get playlist tracks
-      const playlistRes = await spotifyApiCall(
-        `https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=100`,
-        {},
-        false
-      );
+      let queue: any[] = [];
+      let currentlyPlaying = null;
 
-      if (!playlistRes.ok) {
-        return res.json({ queue: [], currently_playing: null });
-      }
-
-      const playlistData = await playlistRes.json();
-
-      // Get immediate player queue first (these have highest priority)
-      let immediateQueue: any[] = [];
+      // Get immediate player queue
       try {
         const queueRes = await spotifyApiCall(
           "https://api.spotify.com/v1/me/player/queue",
@@ -829,7 +742,7 @@ export async function registerRoutes(
 
         if (queueRes.ok && queueRes.status !== 204) {
           const queueData = await queueRes.json();
-          immediateQueue = (queueData.queue || []).map((track: any) => ({
+          queue = (queueData.queue || []).map((track: any) => ({
             id: track.id,
             name: track.name,
             artist: track.artists.map((a: any) => a.name).join(", "),
@@ -837,61 +750,25 @@ export async function registerRoutes(
             image: track.album.images[0]?.url,
             uri: track.uri,
             duration_ms: track.duration_ms,
-            is_immediate: true, // Mark as immediate queue item
           }));
-        }
-      } catch (e) {
-        console.log(`[QUEUE-GET-${requestId}] Could not get immediate queue:`, e);
-      }
 
-      const playlistTracks = (playlistData.items || [])
-        .filter((item: any) => item.track && !item.is_local) // Filter out null tracks and local files
-        .map((item: any) => ({
-          id: item.track.id,
-          name: item.track.name,
-          artist: item.track.artists.map((a: any) => a.name).join(", "),
-          album: item.track.album.name,
-          image: item.track.album.images[0]?.url,
-          uri: item.track.uri,
-          duration_ms: item.track.duration_ms,
-          snapshot_id: item.track.id, // For removal
-          is_immediate: false, // Mark as playlist item
-        }));
-
-      // Remove duplicates - if a track is in immediate queue, don't show it again from playlist
-      const immediateUris = new Set(immediateQueue.map((t: any) => t.uri));
-      const filteredPlaylistTracks = playlistTracks.filter((t: any) => !immediateUris.has(t.uri));
-
-      // Combine: immediate queue first (highest priority), then playlist tracks
-      const allTracks = [...immediateQueue, ...filteredPlaylistTracks];
-
-      // Get currently playing track
-      let currentlyPlaying = null;
-      try {
-        const nowPlayingRes = await spotifyApiCall(
-          "https://api.spotify.com/v1/me/player/currently-playing",
-          {},
-          false
-        );
-        if (nowPlayingRes.ok && nowPlayingRes.status !== 204) {
-          const nowPlayingData = await nowPlayingRes.json();
-          if (nowPlayingData.item) {
+          if (queueData.currently_playing) {
             currentlyPlaying = {
-              id: nowPlayingData.item.id,
-              name: nowPlayingData.item.name,
-              artist: nowPlayingData.item.artists.map((a: any) => a.name).join(", "),
-              album: nowPlayingData.item.album.name,
-              image: nowPlayingData.item.album.images[0]?.url,
-              uri: nowPlayingData.item.uri,
-              duration_ms: nowPlayingData.item.duration_ms,
+              id: queueData.currently_playing.id,
+              name: queueData.currently_playing.name,
+              artist: queueData.currently_playing.artists?.map((a: any) => a.name).join(", "),
+              album: queueData.currently_playing.album?.name,
+              image: queueData.currently_playing.album?.images?.[0]?.url,
+              uri: queueData.currently_playing.uri,
+              duration_ms: queueData.currently_playing.duration_ms,
             };
           }
         }
-      } catch (e) {
-        // Ignore - might not be playing
+      } catch {
+        // ignore
       }
 
-      res.json({ queue: allTracks, currently_playing: currentlyPlaying });
+      res.json({ queue, currently_playing: currentlyPlaying });
     } catch (error: any) {
       console.error(`[QUEUE-GET-${requestId}] Error:`, error.message);
       if (!res.headersSent) {
