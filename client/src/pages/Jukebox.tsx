@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Play, Pause, SkipForward, Volume2, Volume1, Plus, Music2, Lock, Unlock, LogIn } from "lucide-react";
+import { Play, Pause, SkipForward, Volume2, Volume1, Plus, Music2, Lock, Unlock, LogIn, List, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
@@ -39,6 +39,16 @@ interface SearchTrack {
   duration_ms: number;
 }
 
+interface QueueTrack {
+  id: string;
+  name: string;
+  artist: string;
+  album: string;
+  image: string | null;
+  uri: string;
+  duration_ms: number;
+}
+
 export default function Jukebox() {
   const { toast } = useToast();
   const [songInput, setSongInput] = useState("");
@@ -54,6 +64,12 @@ export default function Jukebox() {
   const [searchSuggestions, setSearchSuggestions] = useState<SearchTrack[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
+  
+  // Queue state
+  const [showQueue, setShowQueue] = useState(false);
+  const [queue, setQueue] = useState<QueueTrack[]>([]);
+  const [currentlyPlaying, setCurrentlyPlaying] = useState<QueueTrack | null>(null);
+  const [isLoadingQueue, setIsLoadingQueue] = useState(false);
   
   // State for UI
   const [isPlaying, setIsPlaying] = useState(false);
@@ -405,6 +421,77 @@ export default function Jukebox() {
     handleQueueSongWithUri();
   };
 
+  const fetchQueue = async () => {
+    setIsLoadingQueue(true);
+    try {
+      const res = await fetch("/api/spotify/queue");
+      if (res.ok) {
+        const data = await res.json();
+        setQueue(data.queue || []);
+        setCurrentlyPlaying(data.currently_playing || null);
+      }
+    } catch (e) {
+      console.error("Error fetching queue:", e);
+      toast({ title: "Error", description: "Failed to load queue", variant: "destructive" });
+    } finally {
+      setIsLoadingQueue(false);
+    }
+  };
+
+  const handleToggleQueue = () => {
+    if (!showQueue) {
+      fetchQueue();
+    }
+    setShowQueue(!showQueue);
+  };
+
+  const handleRemoveFromQueue = async (uri: string) => {
+    if (!isAuthenticated || !adminPassword) {
+      toast({ 
+        title: "Authentication Required", 
+        description: "Admin access required to remove songs from queue.", 
+        variant: "destructive" 
+      });
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/spotify/queue", {
+        method: "DELETE",
+        headers: { 
+          "Content-Type": "application/json",
+          "password": adminPassword
+        },
+        body: JSON.stringify({ uri }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        toast({ 
+          title: "Error", 
+          description: data.error || "Failed to remove from queue", 
+          variant: "destructive" 
+        });
+        return;
+      }
+
+      toast({ 
+        title: "Success", 
+        description: "Removed from queue", 
+        className: "text-spotify-green border-spotify-green" 
+      });
+      
+      // Refresh queue
+      fetchQueue();
+      // Refresh now playing
+      setTimeout(() => fetchNowPlaying(), 500);
+    } catch (e) {
+      console.error("Remove queue error:", e);
+      toast({ title: "Network Error", description: "Failed to remove from queue", variant: "destructive" });
+    }
+  };
+
   const executeAdminAction = (action: () => void) => {
     console.log("executeAdminAction called, isAuthenticated:", isAuthenticated);
     if (isAuthenticated && adminPassword) {
@@ -489,10 +576,23 @@ export default function Jukebox() {
         
         {/* Header */}
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-display font-bold text-[#1DB954] tracking-tight mb-2 flex items-center justify-center gap-2">
-            <Music2 className="w-8 h-8" />
-            KARIVEPPILA JUKEBOX
-          </h1>
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex-1"></div>
+            <h1 className="text-3xl font-display font-bold text-[#1DB954] tracking-tight flex items-center justify-center gap-2 flex-1">
+              <Music2 className="w-8 h-8" />
+              KARIVEPPILA JUKEBOX
+            </h1>
+            <div className="flex-1 flex justify-end">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleToggleQueue}
+                className="text-[#1DB954] hover:text-[#1ed760] hover:bg-[#1DB954]/10"
+              >
+                <List className="w-5 h-5" />
+              </Button>
+            </div>
+          </div>
           <p className="text-zinc-400 text-sm">
             {currentTrack.name === "Ready to Play" ? "Queue is empty" : "Now Playing"}
           </p>
@@ -624,6 +724,100 @@ export default function Jukebox() {
         </div>
 
         <div className="h-px bg-white/10 w-full mb-6"></div>
+
+        {/* Queue Display */}
+        {showQueue && (
+          <div className="mb-6 bg-[#181818]/90 backdrop-blur-xl border border-[#1DB954]/40 rounded-xl shadow-2xl p-4 max-h-64 overflow-y-auto custom-scrollbar">
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-sm text-[#1DB954] font-bold uppercase tracking-wider flex items-center gap-2">
+                <List className="w-4 h-4" />
+                Queue ({queue.length + (currentlyPlaying ? 1 : 0)})
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowQueue(false)}
+                className="text-zinc-400 hover:text-white h-6 w-6 p-0"
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+            {isLoadingQueue ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="w-6 h-6 border-2 border-[#1DB954] border-t-transparent rounded-full animate-spin"></div>
+              </div>
+            ) : queue.length === 0 && !currentlyPlaying ? (
+              <div className="text-center py-8 text-zinc-500 text-sm">
+                Queue is empty
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {currentlyPlaying && (
+                  <div className="flex items-center gap-2 p-2 rounded-md bg-[#1DB954]/10 border border-[#1DB954]/30">
+                    {currentlyPlaying.image ? (
+                      <img 
+                        src={currentlyPlaying.image} 
+                        alt={currentlyPlaying.name}
+                        className="w-10 h-10 rounded-md object-cover flex-shrink-0"
+                      />
+                    ) : (
+                      <div className="w-10 h-10 rounded-md bg-gradient-to-br from-[#1DB954]/20 to-[#282828] flex items-center justify-center flex-shrink-0 border border-[#1DB954]/20">
+                        <Music2 className="w-4 h-4 text-[#1DB954]" />
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-white text-sm font-medium truncate">
+                        {currentlyPlaying.name}
+                      </p>
+                      <p className="text-zinc-400 text-xs truncate">
+                        {currentlyPlaying.artist}
+                      </p>
+                    </div>
+                    <div className="text-[10px] text-[#1DB954] font-bold uppercase px-2 py-1 bg-[#1DB954]/20 rounded">
+                      Now
+                    </div>
+                  </div>
+                )}
+                {queue.map((track, index) => (
+                  <div 
+                    key={track.id || index}
+                    className="flex items-center gap-2 p-2 rounded-md hover:bg-[#282828]/50 transition-colors group border border-transparent hover:border-[#1DB954]/20"
+                  >
+                    {track.image ? (
+                      <img 
+                        src={track.image} 
+                        alt={track.name}
+                        className="w-10 h-10 rounded-md object-cover flex-shrink-0"
+                      />
+                    ) : (
+                      <div className="w-10 h-10 rounded-md bg-gradient-to-br from-[#1DB954]/20 to-[#282828] flex items-center justify-center flex-shrink-0 border border-[#1DB954]/20">
+                        <Music2 className="w-4 h-4 text-[#1DB954]" />
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-white text-sm font-medium truncate">
+                        {track.name}
+                      </p>
+                      <p className="text-zinc-400 text-xs truncate">
+                        {track.artist}
+                      </p>
+                    </div>
+                    {isAuthenticated && adminPassword && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleRemoveFromQueue(track.uri)}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity h-7 w-7 p-0 text-red-400 hover:text-red-300 hover:bg-red-500/20"
+                      >
+                        <X className="w-4 h-4" />
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Admin Controls Section */}
         <div className="space-y-4">

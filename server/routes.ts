@@ -607,6 +607,111 @@ export async function registerRoutes(
     }
   });
 
+  // Get current queue (anyone can view)
+  app.get("/api/spotify/queue", async (req, res) => {
+    const requestId = Math.random().toString(36).substring(7);
+    try {
+      const queueRes = await spotifyApiCall(
+        "https://api.spotify.com/v1/me/player/queue",
+        {},
+        false
+      );
+
+      if (queueRes.status === 204 || !queueRes.ok) {
+        return res.json({ queue: [], currently_playing: null });
+      }
+
+      const queueData = await queueRes.json();
+      const queue = (queueData.queue || []).map((track: any) => ({
+        id: track.id,
+        name: track.name,
+        artist: track.artists.map((a: any) => a.name).join(", "),
+        album: track.album.name,
+        image: track.album.images[0]?.url,
+        uri: track.uri,
+        duration_ms: track.duration_ms,
+      }));
+
+      const currentlyPlaying = queueData.currently_playing ? {
+        id: queueData.currently_playing.id,
+        name: queueData.currently_playing.name,
+        artist: queueData.currently_playing.artists.map((a: any) => a.name).join(", "),
+        album: queueData.currently_playing.album.name,
+        image: queueData.currently_playing.album.images[0]?.url,
+        uri: queueData.currently_playing.uri,
+        duration_ms: queueData.currently_playing.duration_ms,
+      } : null;
+
+      res.json({ queue, currently_playing: currentlyPlaying });
+    } catch (error: any) {
+      console.error(`[QUEUE-GET-${requestId}] Error:`, error.message);
+      if (!res.headersSent) {
+        res.json({ queue: [], currently_playing: null });
+      }
+    }
+  });
+
+  // Remove from queue (admin only - requires password)
+  app.delete("/api/spotify/queue", async (req, res) => {
+    const requestId = Math.random().toString(36).substring(7);
+    try {
+      const { uri } = req.body;
+      const { password } = req.headers;
+
+      if (!uri) {
+        return res.status(400).json({ error: "Missing uri parameter" });
+      }
+
+      // Password check - must be set in environment variables
+      const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+      if (!ADMIN_PASSWORD) {
+        log("ERROR: ADMIN_PASSWORD not configured", "spotify");
+        return res.status(500).json({ error: "Server configuration error: Admin password not set" });
+      }
+      if (password !== ADMIN_PASSWORD) {
+        return res.status(401).json({ error: "Unauthorized - Admin access required" });
+      }
+
+      // Note: Spotify API doesn't have a direct "remove from queue" endpoint
+      // We'll need to skip to next track if it's the next one, or inform user
+      // For now, we'll return an error explaining the limitation
+      // In the future, we could implement a workaround by skipping tracks
+      
+      // Check if the track is next in queue
+      const queueRes = await spotifyApiCall(
+        "https://api.spotify.com/v1/me/player/queue",
+        {},
+        false
+      );
+
+      if (queueRes.ok) {
+        const queueData = await queueRes.json();
+        const nextTrack = queueData.queue?.[0];
+        
+        if (nextTrack && nextTrack.uri === uri) {
+          // Skip to next track (removes current next from queue)
+          await spotifyApiCall("https://api.spotify.com/v1/me/player/next", {
+            method: "POST",
+          });
+          res.json({ success: true, message: "Track removed from queue" });
+        } else {
+          // Track is not next in queue - Spotify API limitation
+          res.status(400).json({ 
+            error: "Can only remove the next track in queue. Spotify API limitation." 
+          });
+        }
+      } else {
+        res.status(400).json({ error: "Unable to access queue" });
+      }
+    } catch (error: any) {
+      console.error(`[QUEUE-DELETE-${requestId}] Error:`, error.message);
+      log(`Queue remove error: ${error.message}`, "spotify");
+      if (!res.headersSent) {
+        res.status(500).json({ error: error.message || "Failed to remove from queue" });
+      }
+    }
+  });
+
   // Get currently playing (no auth required)
   app.get("/api/spotify/now-playing", async (req, res) => {
     try {
