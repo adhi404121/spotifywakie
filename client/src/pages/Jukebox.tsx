@@ -552,10 +552,10 @@ export default function Jukebox() {
               )}
               {/* Search Suggestions Dropdown - Shows Upwards */}
               {showSuggestions && searchSuggestions.length > 0 && (
-                <div className="absolute z-[100] w-full bottom-full mb-2 bg-[#181818]/90 backdrop-blur-xl border border-[#1DB954]/40 rounded-xl shadow-2xl max-h-80 overflow-y-auto custom-scrollbar">
+                <div className="absolute z-[100] w-full bottom-full mb-2 bg-[#181818]/90 backdrop-blur-xl border border-[#1DB954]/40 rounded-xl shadow-2xl max-h-64 overflow-y-auto custom-scrollbar">
                   <style>{`
                     .custom-scrollbar::-webkit-scrollbar {
-                      width: 8px;
+                      width: 6px;
                     }
                     .custom-scrollbar::-webkit-scrollbar-track {
                       background: rgba(40, 40, 40, 0.5);
@@ -570,12 +570,12 @@ export default function Jukebox() {
                       background: linear-gradient(180deg, #1ed760 0%, #1DB954 100%);
                     }
                   `}</style>
-                  <div className="p-3">
-                    <div className="text-xs text-[#1DB954] px-3 py-2 font-bold uppercase tracking-wider flex items-center gap-2">
-                      <Music2 className="w-3 h-3" />
+                  <div className="p-2">
+                    <div className="text-[10px] text-[#1DB954] px-2 py-1.5 font-bold uppercase tracking-wider flex items-center gap-1.5">
+                      <Music2 className="w-2.5 h-2.5" />
                       Suggestions
                     </div>
-                    <div className="space-y-1">
+                    <div className="space-y-0.5">
                       {searchSuggestions.map((track, index) => (
                         <div
                           key={track.id}
@@ -587,35 +587,30 @@ export default function Jukebox() {
                           onMouseDown={(e) => {
                             e.preventDefault(); // Prevent input blur
                           }}
-                          className="flex items-center gap-3 p-3 hover:bg-[#1DB954]/20 cursor-pointer transition-all rounded-lg group border border-transparent hover:border-[#1DB954]/40 hover:shadow-lg hover:shadow-[#1DB954]/10 backdrop-blur-sm bg-[#282828]/30"
+                          className="flex items-center gap-2 p-2 hover:bg-[#1DB954]/20 cursor-pointer transition-all rounded-md group border border-transparent hover:border-[#1DB954]/40 hover:shadow-md hover:shadow-[#1DB954]/10 backdrop-blur-sm bg-[#282828]/30"
                         >
                           {track.image ? (
                             <img 
                               src={track.image} 
                               alt={track.name}
-                              className="w-14 h-14 rounded-lg object-cover flex-shrink-0 shadow-lg group-hover:shadow-[#1DB954]/30 transition-all group-hover:scale-105"
+                              className="w-10 h-10 rounded-md object-cover flex-shrink-0 shadow-md group-hover:shadow-[#1DB954]/30 transition-all group-hover:scale-105"
                             />
                           ) : (
-                            <div className="w-14 h-14 rounded-lg bg-gradient-to-br from-[#1DB954]/20 to-[#282828] flex items-center justify-center flex-shrink-0 border border-[#1DB954]/20 group-hover:border-[#1DB954]/40 transition-colors">
-                              <Music2 className="w-6 h-6 text-[#1DB954]" />
+                            <div className="w-10 h-10 rounded-md bg-gradient-to-br from-[#1DB954]/20 to-[#282828] flex items-center justify-center flex-shrink-0 border border-[#1DB954]/20 group-hover:border-[#1DB954]/40 transition-colors">
+                              <Music2 className="w-4 h-4 text-[#1DB954]" />
                             </div>
                           )}
                           <div className="flex-1 min-w-0">
-                            <p className="text-white font-semibold truncate group-hover:text-[#1DB954] transition-colors">
+                            <p className="text-white text-sm font-medium truncate group-hover:text-[#1DB954] transition-colors">
                               {track.name}
                             </p>
-                            <p className="text-zinc-400 text-sm truncate mt-0.5 group-hover:text-zinc-300 transition-colors">
+                            <p className="text-zinc-400 text-xs truncate group-hover:text-zinc-300 transition-colors">
                               {track.artist}
                             </p>
-                            {track.album && (
-                              <p className="text-zinc-500 text-xs truncate mt-0.5 group-hover:text-zinc-400 transition-colors">
-                                {track.album}
-                              </p>
-                            )}
                           </div>
                           <div className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-all transform group-hover:scale-110">
-                            <div className="w-8 h-8 rounded-full bg-[#1DB954]/20 flex items-center justify-center border border-[#1DB954]/40">
-                              <Plus className="w-4 h-4 text-[#1DB954]" />
+                            <div className="w-6 h-6 rounded-full bg-[#1DB954]/20 flex items-center justify-center border border-[#1DB954]/40">
+                              <Plus className="w-3 h-3 text-[#1DB954]" />
                             </div>
                           </div>
                         </div>
