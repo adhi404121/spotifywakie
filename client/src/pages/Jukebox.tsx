@@ -767,95 +767,130 @@ export default function Jukebox() {
 
         {/* Queue Display */}
         {showQueue && (
-          <div className="mb-6 bg-[#181818]/90 backdrop-blur-xl border border-[#1DB954]/40 rounded-xl shadow-2xl p-4 max-h-64 overflow-y-auto custom-scrollbar">
-            <div className="flex items-center justify-between mb-3">
-              <div className="text-sm text-[#1DB954] font-bold uppercase tracking-wider flex items-center gap-2">
-                <List className="w-4 h-4" />
-                Queue ({queue.length + (currentlyPlaying ? 1 : 0)})
+          <div className="mb-6 bg-[#181818]/90 backdrop-blur-xl border border-[#1DB954]/40 rounded-xl shadow-2xl max-h-64 overflow-y-auto custom-scrollbar">
+            <style>{`
+              .custom-scrollbar::-webkit-scrollbar {
+                width: 6px;
+              }
+              .custom-scrollbar::-webkit-scrollbar-track {
+                background: rgba(40, 40, 40, 0.5);
+                border-radius: 10px;
+              }
+              .custom-scrollbar::-webkit-scrollbar-thumb {
+                background: linear-gradient(180deg, #1DB954 0%, #1ed760 100%);
+                border-radius: 10px;
+                border: 1px solid rgba(29, 185, 84, 0.3);
+              }
+              .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+                background: linear-gradient(180deg, #1ed760 0%, #1DB954 100%);
+              }
+            `}</style>
+            <div className="p-2 sticky top-0 bg-[#181818]/95 backdrop-blur-xl z-10 border-b border-[#1DB954]/20">
+              <div className="flex items-center justify-between">
+                <div className="text-[10px] text-[#1DB954] px-2 py-1.5 font-bold uppercase tracking-wider flex items-center gap-1.5">
+                  <List className="w-2.5 h-2.5" />
+                  Queue ({queue.length + (currentlyPlaying ? 1 : 0)})
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowQueue(false)}
+                  className="text-zinc-400 hover:text-white h-6 w-6 p-0"
+                >
+                  <X className="w-3 h-3" />
+                </Button>
               </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowQueue(false)}
-                className="text-zinc-400 hover:text-white h-6 w-6 p-0"
-              >
-                <X className="w-4 h-4" />
-              </Button>
             </div>
-            {isLoadingQueue ? (
-              <div className="flex items-center justify-center py-8">
-                <div className="w-6 h-6 border-2 border-[#1DB954] border-t-transparent rounded-full animate-spin"></div>
-              </div>
-            ) : queue.length === 0 && !currentlyPlaying ? (
-              <div className="text-center py-8 text-zinc-500 text-sm">
-                Queue is empty
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {currentlyPlaying && (
-                  <div className="flex items-center gap-2 p-2 rounded-md bg-[#1DB954]/10 border border-[#1DB954]/30">
-                    {currentlyPlaying.image ? (
-                      <img 
-                        src={currentlyPlaying.image} 
-                        alt={currentlyPlaying.name}
-                        className="w-10 h-10 rounded-md object-cover flex-shrink-0"
-                      />
-                    ) : (
-                      <div className="w-10 h-10 rounded-md bg-gradient-to-br from-[#1DB954]/20 to-[#282828] flex items-center justify-center flex-shrink-0 border border-[#1DB954]/20">
-                        <Music2 className="w-4 h-4 text-[#1DB954]" />
+            <div 
+              ref={queueScrollRef}
+              onScroll={() => {
+                isScrollingRef.current = true;
+                if (scrollTimeoutRef.current) {
+                  clearTimeout(scrollTimeoutRef.current);
+                }
+                scrollTimeoutRef.current = setTimeout(() => {
+                  isScrollingRef.current = false;
+                }, 300);
+              }}
+              className="p-2"
+            >
+              {isLoadingQueue ? (
+                <div className="flex items-center justify-center py-8">
+                  <div className="w-6 h-6 border-2 border-[#1DB954] border-t-transparent rounded-full animate-spin"></div>
+                </div>
+              ) : queue.length === 0 && !currentlyPlaying ? (
+                <div className="text-center py-8 text-zinc-500 text-sm">
+                  Queue is empty
+                </div>
+              ) : (
+                <div className="space-y-0.5">
+                  {currentlyPlaying && (
+                    <div className="flex items-center gap-2 p-2 rounded-md bg-[#1DB954]/20 hover:bg-[#1DB954]/30 cursor-pointer transition-all group border border-[#1DB954]/40 hover:border-[#1DB954]/60 hover:shadow-md hover:shadow-[#1DB954]/10 backdrop-blur-sm">
+                      {currentlyPlaying.image ? (
+                        <img 
+                          src={currentlyPlaying.image} 
+                          alt={currentlyPlaying.name}
+                          className="w-10 h-10 rounded-md object-cover flex-shrink-0 shadow-md group-hover:shadow-[#1DB954]/30 transition-all group-hover:scale-105"
+                        />
+                      ) : (
+                        <div className="w-10 h-10 rounded-md bg-gradient-to-br from-[#1DB954]/20 to-[#282828] flex items-center justify-center flex-shrink-0 border border-[#1DB954]/20 group-hover:border-[#1DB954]/40 transition-colors">
+                          <Music2 className="w-4 h-4 text-[#1DB954]" />
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-white text-sm font-medium truncate group-hover:text-[#1DB954] transition-colors">
+                          {currentlyPlaying.name}
+                        </p>
+                        <p className="text-zinc-400 text-xs truncate group-hover:text-zinc-300 transition-colors">
+                          {currentlyPlaying.artist}
+                        </p>
                       </div>
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <p className="text-white text-sm font-medium truncate">
-                        {currentlyPlaying.name}
-                      </p>
-                      <p className="text-zinc-400 text-xs truncate">
-                        {currentlyPlaying.artist}
-                      </p>
-                    </div>
-                    <div className="text-[10px] text-[#1DB954] font-bold uppercase px-2 py-1 bg-[#1DB954]/20 rounded">
-                      Now
-                    </div>
-                  </div>
-                )}
-                {queue.map((track, index) => (
-                  <div 
-                    key={track.id || index}
-                    className="flex items-center gap-2 p-2 rounded-md hover:bg-[#282828]/50 transition-colors group border border-transparent hover:border-[#1DB954]/20"
-                  >
-                    {track.image ? (
-                      <img 
-                        src={track.image} 
-                        alt={track.name}
-                        className="w-10 h-10 rounded-md object-cover flex-shrink-0"
-                      />
-                    ) : (
-                      <div className="w-10 h-10 rounded-md bg-gradient-to-br from-[#1DB954]/20 to-[#282828] flex items-center justify-center flex-shrink-0 border border-[#1DB954]/20">
-                        <Music2 className="w-4 h-4 text-[#1DB954]" />
+                      <div className="text-[10px] text-[#1DB954] font-bold uppercase px-2 py-1 bg-[#1DB954]/30 rounded border border-[#1DB954]/40">
+                        Now
                       </div>
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <p className="text-white text-sm font-medium truncate">
-                        {track.name}
-                      </p>
-                      <p className="text-zinc-400 text-xs truncate">
-                        {track.artist}
-                      </p>
                     </div>
-                    {isAuthenticated && adminPassword && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleRemoveFromQueue(track.uri)}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity h-7 w-7 p-0 text-red-400 hover:text-red-300 hover:bg-red-500/20"
-                      >
-                        <X className="w-4 h-4" />
-                      </Button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
+                  )}
+                  {queue.map((track, index) => (
+                    <div 
+                      key={track.id || index}
+                      className="flex items-center gap-2 p-2 rounded-md hover:bg-[#1DB954]/20 cursor-pointer transition-all group border border-transparent hover:border-[#1DB954]/40 hover:shadow-md hover:shadow-[#1DB954]/10 backdrop-blur-sm bg-[#282828]/30"
+                    >
+                      {track.image ? (
+                        <img 
+                          src={track.image} 
+                          alt={track.name}
+                          className="w-10 h-10 rounded-md object-cover flex-shrink-0 shadow-md group-hover:shadow-[#1DB954]/30 transition-all group-hover:scale-105"
+                        />
+                      ) : (
+                        <div className="w-10 h-10 rounded-md bg-gradient-to-br from-[#1DB954]/20 to-[#282828] flex items-center justify-center flex-shrink-0 border border-[#1DB954]/20 group-hover:border-[#1DB954]/40 transition-colors">
+                          <Music2 className="w-4 h-4 text-[#1DB954]" />
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-white text-sm font-medium truncate group-hover:text-[#1DB954] transition-colors">
+                          {track.name}
+                        </p>
+                        <p className="text-zinc-400 text-xs truncate group-hover:text-zinc-300 transition-colors">
+                          {track.artist}
+                        </p>
+                      </div>
+                      {isAuthenticated && adminPassword && (
+                        <div className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-all transform group-hover:scale-110">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleRemoveFromQueue(track.uri)}
+                            className="h-6 w-6 p-0 text-red-400 hover:text-red-300 hover:bg-red-500/20"
+                          >
+                            <X className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
 
