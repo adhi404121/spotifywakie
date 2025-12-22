@@ -945,24 +945,6 @@ export async function registerRoutes(
       // Get playlist ID
       const playlistId = await getOrCreateRadioPlaylist();
       
-      // Fetch playlist info once to get the current snapshot_id
-      const playlistInfoRes = await spotifyApiCall(
-        `https://api.spotify.com/v1/playlists/${playlistId}`,
-        {},
-        false
-      );
-      
-      if (!playlistInfoRes.ok) {
-        throw new Error("Failed to get playlist info");
-      }
-      
-      const playlistInfo = await playlistInfoRes.json();
-      const snapshotId = playlistInfo.snapshot_id;
-
-      if (!snapshotId) {
-        throw new Error("Failed to get playlist snapshot_id");
-      }
-
       // Fetch playlist tracks (first 100) to locate the track
       const playlistTracksRes = await spotifyApiCall(
         `https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=100`,
@@ -1012,7 +994,7 @@ export async function registerRoutes(
         });
       }
 
-      // Remove track from playlist using the snapshot_id from the playlist info
+      // Remove track from playlist (let Spotify manage snapshot internally)
       const removeRes = await spotifyApiCall(
         `https://api.spotify.com/v1/playlists/${playlistId}/tracks`,
         {
@@ -1022,7 +1004,6 @@ export async function registerRoutes(
           },
           body: JSON.stringify({
             tracks: [{ uri: trackUri }],
-            snapshot_id: snapshotId,
           }),
         },
         false
@@ -1041,7 +1022,6 @@ export async function registerRoutes(
           status: removeRes.status,
           statusText: removeRes.statusText,
           error: errorData,
-          snapshotId: snapshotId,
           trackUri: trackUri
         });
         
