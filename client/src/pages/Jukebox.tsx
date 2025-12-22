@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Play, Pause, SkipForward, Volume2, Volume1, Plus, Music2, Lock, Unlock, LogIn, List, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -70,6 +70,9 @@ export default function Jukebox() {
   const [queue, setQueue] = useState<QueueTrack[]>([]);
   const [currentlyPlaying, setCurrentlyPlaying] = useState<QueueTrack | null>(null);
   const [isLoadingQueue, setIsLoadingQueue] = useState(false);
+  const queueScrollRef = useRef<HTMLDivElement>(null);
+  const isScrollingRef = useRef(false);
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
   // State for UI
   const [isPlaying, setIsPlaying] = useState(false);
@@ -270,9 +273,9 @@ export default function Jukebox() {
         // Only update if track actually changed (avoid unnecessary re-renders)
         if (currentTrack.name !== newTrack.name || currentTrack.artist !== newTrack.artist) {
           setCurrentTrack(newTrack);
-          // If queue is open, refresh it when track changes
+          // If queue is open, refresh it when track changes (preserve scroll)
           if (showQueue) {
-            fetchQueue();
+            fetchQueue(true);
           }
         }
         setIsPlaying(data.playing);
