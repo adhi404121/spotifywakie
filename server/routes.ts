@@ -813,8 +813,8 @@ export async function registerRoutes(
         }));
 
       // Remove duplicates - if a track is in immediate queue, don't show it again from playlist
-      const immediateUris = new Set(immediateQueue.map(t => t.uri));
-      const filteredPlaylistTracks = playlistTracks.filter(t => !immediateUris.has(t.uri));
+      const immediateUris = new Set(immediateQueue.map((t: any) => t.uri));
+      const filteredPlaylistTracks = playlistTracks.filter((t: any) => !immediateUris.has(t.uri));
 
       // Combine: immediate queue first (highest priority), then playlist tracks
       const allTracks = [...immediateQueue, ...filteredPlaylistTracks];
