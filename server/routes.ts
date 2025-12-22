@@ -507,8 +507,20 @@ export async function registerRoutes(
       // This ensures newly queued songs play before existing playlist songs
       
       // Step 1: Add to immediate player queue (highest priority - plays next)
+      // IMPORTANT: This must succeed for songs to play in the correct order
       let queueAdded = false;
       try {
+        // First, ensure player is active (queue API requires active player)
+        const playerCheckRes = await spotifyApiCall(
+          "https://api.spotify.com/v1/me/player",
+          {},
+          false
+        );
+        
+        if (!playerCheckRes.ok && playerCheckRes.status !== 204) {
+          console.log(`[QUEUE-${requestId}] Player not active, will start playback after adding to queue`);
+        }
+
         const queueUrl = `https://api.spotify.com/v1/me/player/queue?uri=${encodeURIComponent(trackUri)}`;
         console.log(`[QUEUE-${requestId}] Adding to immediate queue:`, { trackUri, queueUrl });
         
@@ -516,12 +528,22 @@ export async function registerRoutes(
         
         if (queueRes.ok || queueRes.status === 204) {
           queueAdded = true;
-          console.log(`[QUEUE-${requestId}] Successfully added to immediate queue`);
+          console.log(`[QUEUE-${requestId}] ✅ Successfully added to immediate queue - will play next`);
         } else {
-          console.log(`[QUEUE-${requestId}] Queue add returned status:`, queueRes.status);
+          const errorText = await queueRes.text().catch(() => "Could not read error");
+          console.error(`[QUEUE-${requestId}] ❌ Queue add failed:`, {
+            status: queueRes.status,
+            statusText: queueRes.statusText,
+            error: errorText
+          });
+          // Don't fail completely - still add to playlist
         }
-      } catch (e) {
-        console.log(`[QUEUE-${requestId}] Could not add to immediate queue (will use playlist only):`, e);
+      } catch (e: any) {
+        console.error(`[QUEUE-${requestId}] ❌ Exception adding to immediate queue:`, {
+          message: e.message,
+          stack: e.stack
+        });
+        // Continue to add to playlist as fallback
       }
 
       // Step 2: Also add to playlist at position 0 for persistence and queue view
